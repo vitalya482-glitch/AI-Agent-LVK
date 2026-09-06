@@ -1,0 +1,7 @@
+{
+  "appId": "ai-agent-lvk",
+  "currentVersion": "@PROJECT_VERSION@",
+  "channel": "stable",
+  "mainExe": "AI-Agent-LVK.exe",
+  "manifestUrl": "https://raw.githubusercontent.com/vitalya482-glitch/AI-Agent-LVK/main/update/manifest.json"
+}
