@@ -10,9 +10,10 @@ The first version is intentionally small:
 - application version output;
 - `help`, `version`, `update`, `clear`, `exit` commands;
 - integration with the existing **LVK-Updater**;
-- hidden Win32 update bridge so LVK-Updater can close the console process only when an update is actually ready to install.
+- hidden Win32 update bridge so LVK-Updater can close the console process only when an update is actually ready to install;
+- automatic tagged releases and updater manifest generation through GitHub Actions.
 
-## Current version
+## Current development version
 
 `0.1.0`
 
@@ -20,8 +21,13 @@ The first version is intentionally small:
 
 ```text
 AI-Agent-LVK/
+├─ .github/workflows/
+│  ├─ windows-build.yml
+│  └─ release.yml
+├─ update/
+│  └─ manifest.json
 ├─ CMakeLists.txt
-├─ app.update.json
+├─ app.update.json.in
 ├─ README.md
 └─ src/
    ├─ main.cpp
@@ -53,9 +59,38 @@ Output:
 
 ```text
 build\Release\AI-Agent-LVK.exe
+build\Release\app.update.json
 ```
 
-CMake automatically copies `app.update.json` next to the executable.
+`app.update.json` is generated from `app.update.json.in` using the CMake project version.
+
+A custom version can be supplied explicitly:
+
+```bat
+cmake -S . -B build -A x64 -DAI_AGENT_LVK_VERSION=0.1.1
+```
+
+## Automatic releases and manifests
+
+A Git tag is the release source of truth. Push a semantic version tag in the form `vX.Y.Z`:
+
+```bat
+git tag v0.1.1
+git push origin v0.1.1
+```
+
+GitHub Actions then automatically:
+
+1. extracts `0.1.1` from the tag;
+2. configures CMake with that exact version;
+3. builds `AI-Agent-LVK.exe` with MSVC;
+4. generates `app.update.json` with the same version;
+5. creates `AI-Agent-LVK-win-x64.zip`;
+6. calculates the ZIP SHA256 and byte size;
+7. creates or updates the matching GitHub Release;
+8. rewrites `update/manifest.json` on `main` with the version, release URL, SHA256, size and release date.
+
+This means release metadata does not need to be edited manually.
 
 ## LVK-Updater
 
