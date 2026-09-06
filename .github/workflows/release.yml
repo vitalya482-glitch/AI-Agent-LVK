@@ -1,0 +1,123 @@
+name: Release Windows x64
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version from tag
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -notmatch '^v(?<version>\d+\.\d+\.\d+)$') {
+            throw "Release tag must have the form vX.Y.Z. Got: $tag"
+          }
+
+          "TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VERSION=$($Matches.version)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B build -A x64 -DAI_AGENT_LVK_VERSION="$env:VERSION"
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --config Release
+
+      - name: Package release and calculate manifest data
+        shell: pwsh
+        run: |
+          $packageDir = Join-Path $PWD 'release-package'
+          $zipPath = Join-Path $PWD 'AI-Agent-LVK-win-x64.zip'
+
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+          Copy-Item 'build\Release\AI-Agent-LVK.exe' $packageDir
+          Copy-Item 'build\Release\app.update.json' $packageDir
+
+          if (Test-Path $zipPath) {
+            Remove-Item $zipPath -Force
+          }
+
+          Compress-Archive -Path "$packageDir\*" -DestinationPath $zipPath -CompressionLevel Optimal
+
+          $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath).Hash.ToLowerInvariant()
+          $size = (Get-Item -LiteralPath $zipPath).Length
+
+          "PACKAGE_SHA256=$sha256" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PACKAGE_SIZE=$size" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          Write-Host "Package: $zipPath"
+          Write-Host "SHA256: $sha256"
+          Write-Host "Size: $size bytes"
+
+      - name: Create or update GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG 'AI-Agent-LVK-win-x64.zip' --clobber
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          else {
+            gh release create $env:TAG 'AI-Agent-LVK-win-x64.zip' --title "AI-Agent-LVK $env:VERSION" --generate-notes
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Update public updater manifest on main
+        shell: pwsh
+        run: |
+          git fetch origin main
+          git checkout -B main origin/main
+
+          $releaseDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+          $downloadUrl = "https://github.com/vitalya482-glitch/AI-Agent-LVK/releases/download/$env:TAG/AI-Agent-LVK-win-x64.zip"
+
+          $manifest = [ordered]@{
+            appId = 'ai-agent-lvk'
+            name = 'AI-Agent-LVK'
+            latestVersion = $env:VERSION
+            channel = 'stable'
+            mandatory = $false
+            releaseDate = $releaseDate
+            mainExe = 'AI-Agent-LVK.exe'
+            package = [ordered]@{
+              url = $downloadUrl
+              sha256 = $env:PACKAGE_SHA256
+              size = [Int64]$env:PACKAGE_SIZE
+            }
+            notes = @(
+              "Automatic release $env:VERSION"
+            )
+          }
+
+          $json = $manifest | ConvertTo-Json -Depth 8
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText((Join-Path $PWD 'update\manifest.json'), $json + "`n", $utf8NoBom)
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add update/manifest.json
+          git diff --cached --quiet
+
+          if ($LASTEXITCODE -ne 0) {
+            git commit -m "Update release manifest for $env:TAG"
+            git push origin main
+          }
+          else {
+            Write-Host 'Manifest is already up to date.'
+          }
