@@ -58,14 +58,16 @@ bool UpdateCloseBridge::start() {
 }
 
 void UpdateCloseBridge::stop() {
-    if (!running_.exchange(false)) {
-        return;
+    const bool wasRunning = running_.exchange(false);
+
+    if (wasRunning) {
+        if (const HWND hwnd = window_.load(); hwnd != nullptr) {
+            PostMessageW(hwnd, kStopMessage, 0, 0);
+        }
     }
 
-    if (const HWND hwnd = window_.load(); hwnd != nullptr) {
-        PostMessageW(hwnd, kStopMessage, 0, 0);
-    }
-
+    // Always join a joinable worker, including the case where the worker
+    // failed before creating its hidden window and already set running_=false.
     if (thread_.joinable()) {
         thread_.join();
     }
