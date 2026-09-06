@@ -1,0 +1,29 @@
+# CMake / Visual Studio
+build/
+out/
+.vs/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
+# Build outputs
+*.exe
+*.dll
+*.pdb
+*.obj
+*.lib
+*.exp
+
+# Runtime data
+data/
+logs/
+_downloads/
+_update_temp/
+_backup/
+
+# External updater binary
+LVKUpdater.exe
