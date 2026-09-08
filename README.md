@@ -10,13 +10,11 @@ The project deliberately keeps the runtime small and low-level:
 - local HTTP API;
 - separate minimal Win32 GUI client;
 - LVK-Updater integration;
-- Windows first, while keeping the new network/API layer portable for a later Linux move.
+- Windows first, while keeping the network/API layer portable for a later Linux move.
 
 ## Current development version
 
-`0.1.1`
-
-Latest published release is still `v0.1.0` until a `v0.1.1` tag is created.
+`0.1.2`
 
 ## Architecture
 
@@ -77,11 +75,17 @@ build\Release\app.update.json
 
 `AI-Agent-LVK-GUI.exe` is intentionally a very simple native Win32 HTTP client.
 
-A custom version can be supplied explicitly:
+## GUI v0.1.2
 
-```bat
-cmake -S . -B build -A x64 -DAI_AGENT_LVK_VERSION=0.1.2
-```
+The GUI now:
+
+- checks the HTTP API automatically every 2 seconds;
+- shows connected/disconnected state;
+- has `Start Core` to launch `AI-Agent-LVK.exe` from the same directory;
+- has `Restart Core` to stop the current Windows core instance and start it again;
+- sends commands such as `ping`, `status`, `version` and `help` through HTTP only.
+
+The Windows core control buttons are platform-specific UI helpers. Future Linux and Android clients continue to use the same HTTP API instead of depending on Win32 behavior.
 
 ## Console commands
 
@@ -122,18 +126,9 @@ Example command request:
 }
 ```
 
-Example response:
-
-```json
-{
-  "ok": true,
-  "result": "Core: running\nAPI: http://127.0.0.1:7842/api/v1\nModel: not loaded\nAgents: 0"
-}
-```
-
 `POST /api/v1/chat` is reserved now and returns `model_not_loaded` until llama.cpp is integrated.
 
-The HTTP parser is intentionally minimal: short requests, `Content-Length`, connection-close responses and a 1 MiB body limit. It is not intended to be a general web server.
+The HTTP parser is intentionally minimal and is not intended to be a general web server.
 
 ## Cross-platform direction
 
@@ -151,36 +146,6 @@ Windows uses Winsock2. POSIX socket support is already present for the future Li
 The current Win32 GUI itself is platform-specific by design. A Linux or Android client should use the same HTTP API rather than share Win32 UI code.
 
 Remote/mobile access is not enabled yet. Before binding beyond `127.0.0.1`, authentication, permissions and transport security must be designed.
-
-## Project layout
-
-```text
-AI-Agent-LVK/
-|-- gui/
-|   |-- main.cpp
-|   |-- ApiClient.h
-|   `-- ApiClient.cpp
-|-- src/
-|   |-- api/
-|   |   |-- ApiServer.h
-|   |   `-- ApiServer.cpp
-|   |-- core/
-|   |   |-- AppConfig.h
-|   |   |-- CommandDispatcher.h
-|   |   `-- CommandDispatcher.cpp
-|   |-- net/
-|   |   |-- HttpServer.h
-|   |   |-- HttpServer.cpp
-|   |   |-- PlatformSocket.h
-|   |   `-- platform/
-|   |       |-- WindowsSocket.cpp
-|   |       `-- PosixSocket.cpp
-|   |-- update/
-|   `-- main.cpp
-|-- update/
-|-- CMakeLists.txt
-`-- app.update.json.in
-```
 
 ## LVK-Updater
 
@@ -200,11 +165,11 @@ The update command launches the existing updater. On Windows the hidden update b
 A semantic version tag such as:
 
 ```bat
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
-triggers the Windows release workflow. The release ZIP now includes both `AI-Agent-LVK.exe` and `AI-Agent-LVK-GUI.exe`, plus `app.update.json`.
+triggers the Windows release workflow. The release ZIP includes both `AI-Agent-LVK.exe` and `AI-Agent-LVK-GUI.exe`, plus `app.update.json`.
 
 ## Next milestone
 
