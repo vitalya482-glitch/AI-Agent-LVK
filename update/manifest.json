@@ -1,17 +1,17 @@
 {
   "appId": "ai-agent-lvk",
   "name": "AI-Agent-LVK",
-  "latestVersion": "0.1.4",
+  "latestVersion": "0.1.5",
   "channel": "stable",
   "mandatory": false,
   "releaseDate": "2026-09-08",
   "mainExe": "AI-Agent-LVK.exe",
   "package": {
-    "url": "https://github.com/vitalya482-glitch/AI-Agent-LVK/releases/download/v0.1.4/AI-Agent-LVK-win-x64.zip",
-    "sha256": "fd2d11a937069754ba3268a3b42fb3d7541c73f9cbbede558238952f62e24300",
-    "size": 1703048
+    "url": "https://github.com/vitalya482-glitch/AI-Agent-LVK/releases/download/v0.1.5/AI-Agent-LVK-win-x64.zip",
+    "sha256": "7fe28a2afe594a7dd3840b970b77b88d7c48f55f154516c41a1ec9d003a76b47",
+    "size": 1709925
   },
   "notes": [
-    "Automatic release 0.1.4"
+    "Automatic release 0.1.5"
   ]
 }
