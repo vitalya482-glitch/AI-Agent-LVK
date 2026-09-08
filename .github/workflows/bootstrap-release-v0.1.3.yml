@@ -1,0 +1,106 @@
+name: Bootstrap release v0.1.3
+
+on:
+  push:
+    branches:
+      - bootstrap-release-v0.1.3
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Ensure v0.1.3 tag exists
+        shell: pwsh
+        run: |
+          git fetch origin main --tags
+          git rev-parse 'refs/tags/v0.1.3' *> $null
+          if ($LASTEXITCODE -ne 0) {
+            git tag v0.1.3 origin/main
+            git push origin refs/tags/v0.1.3
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B build -A x64 -DAI_AGENT_LVK_VERSION="0.1.3"
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --config Release
+
+      - name: Package release
+        shell: pwsh
+        run: |
+          $packageDir = Join-Path $PWD 'release-package'
+          $zipPath = Join-Path $PWD 'AI-Agent-LVK-win-x64.zip'
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+          Copy-Item 'build\Release\AI-Agent-LVK.exe' $packageDir
+          Copy-Item 'build\Release\AI-Agent-LVK-GUI.exe' $packageDir
+          Copy-Item 'build\Release\app.update.json' $packageDir
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+          Compress-Archive -Path "$packageDir\*" -DestinationPath $zipPath -CompressionLevel Optimal
+          $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath).Hash.ToLowerInvariant()
+          $size = (Get-Item -LiteralPath $zipPath).Length
+          "PACKAGE_SHA256=$sha256" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PACKAGE_SIZE=$size" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Create or update GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view v0.1.3 *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload v0.1.3 'AI-Agent-LVK-win-x64.zip' --clobber
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          else {
+            gh release create v0.1.3 'AI-Agent-LVK-win-x64.zip' --title 'AI-Agent-LVK 0.1.3' --notes 'GUI-managed core now runs headlessly, Enter submits commands, and the GUI has an Update button.'
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Update public updater manifest on main
+        shell: pwsh
+        run: |
+          git fetch origin main
+          git checkout -B main origin/main
+          $manifest = [ordered]@{
+            appId = 'ai-agent-lvk'
+            name = 'AI-Agent-LVK'
+            latestVersion = '0.1.3'
+            channel = 'stable'
+            mandatory = $false
+            releaseDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+            mainExe = 'AI-Agent-LVK.exe'
+            package = [ordered]@{
+              url = 'https://github.com/vitalya482-glitch/AI-Agent-LVK/releases/download/v0.1.3/AI-Agent-LVK-win-x64.zip'
+              sha256 = $env:PACKAGE_SHA256
+              size = [Int64]$env:PACKAGE_SIZE
+            }
+            notes = @(
+              'GUI starts the core in hidden headless mode',
+              'Enter submits commands from the input field',
+              'Added Update button to the GUI'
+            )
+          }
+          $json = $manifest | ConvertTo-Json -Depth 8
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText((Join-Path $PWD 'update\manifest.json'), $json + "`n", $utf8NoBom)
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add update/manifest.json
+          git diff --cached --quiet
+          if ($LASTEXITCODE -ne 0) {
+            git commit -m 'Update release manifest for v0.1.3'
+            git push origin main
+          }
