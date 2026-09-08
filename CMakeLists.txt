@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-set(AI_AGENT_LVK_VERSION "0.1.1" CACHE STRING "AI-Agent-LVK version")
+set(AI_AGENT_LVK_VERSION "0.1.2" CACHE STRING "AI-Agent-LVK version")
 project(AI-Agent-LVK VERSION ${AI_AGENT_LVK_VERSION} LANGUAGES CXX)
 
 find_package(Threads REQUIRED)
