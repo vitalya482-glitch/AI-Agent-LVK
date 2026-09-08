@@ -45,6 +45,7 @@ jobs:
 
           New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
           Copy-Item 'build\Release\AI-Agent-LVK.exe' $packageDir
+          Copy-Item 'build\Release\AI-Agent-LVK-GUI.exe' $packageDir
           Copy-Item 'build\Release\app.update.json' $packageDir
 
           if (Test-Path $zipPath) {

@@ -20,10 +20,11 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Upload executable
+      - name: Upload executables
         uses: actions/upload-artifact@v4
         with:
           name: AI-Agent-LVK-win-x64
           path: |
             build/Release/AI-Agent-LVK.exe
+            build/Release/AI-Agent-LVK-GUI.exe
             build/Release/app.update.json

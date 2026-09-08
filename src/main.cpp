@@ -1,11 +1,13 @@
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-
 #include "update/UpdateCloseBridge.h"
-#include "update/UpdateManager.h"
+#endif
 
-#include <algorithm>
-#include <cctype>
+#include "api/ApiServer.h"
+#include "core/AppConfig.h"
+#include "core/CommandDispatcher.h"
+
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -16,22 +18,6 @@
 
 namespace {
 
-std::string normalizeCommand(std::string value) {
-    const auto first = value.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) {
-        return {};
-    }
-
-    const auto last = value.find_last_not_of(" \t\r\n");
-    value = value.substr(first, last - first + 1);
-
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-
-    return value;
-}
-
 void printBanner() {
     std::cout
         << "========================================\n"
@@ -41,19 +27,18 @@ void printBanner() {
         << "Type 'help' to see available commands.\n\n";
 }
 
-void printHelp() {
-    std::cout
-        << "Commands:\n"
-        << "  help     Show this help\n"
-        << "  version  Show application version\n"
-        << "  update   Check for updates with LVK-Updater\n"
-        << "  clear    Clear the console\n"
-        << "  exit     Exit AI-Agent-LVK\n";
+void clearConsole() {
+#ifdef _WIN32
+    std::system("cls");
+#else
+    std::system("clear");
+#endif
 }
 
 } // namespace
 
 int main() {
+#ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
     SetConsoleTitleW(L"AI-Agent-LVK");
@@ -62,8 +47,29 @@ int main() {
     if (!updateCloseBridge.start()) {
         std::cerr << "Warning: update close bridge could not be started.\n";
     }
+#endif
+
+    lvk::core::CommandDispatcher dispatcher(AI_AGENT_LVK_VERSION);
+    lvk::api::ApiServer apiServer(
+        dispatcher,
+        lvk::core::kDefaultApiHost,
+        lvk::core::kDefaultApiPort);
 
     printBanner();
+
+    if (apiServer.start()) {
+        std::cout
+            << "API server listening on http://"
+            << lvk::core::kDefaultApiHost << ':'
+            << lvk::core::kDefaultApiPort
+            << "/api/v1\n\n";
+    } else {
+        std::cerr
+            << "Warning: API server could not bind to "
+            << lvk::core::kDefaultApiHost << ':'
+            << lvk::core::kDefaultApiPort
+            << ". Console mode will continue.\n\n";
+    }
 
     std::string line;
     while (true) {
@@ -73,34 +79,13 @@ int main() {
             break;
         }
 
-        const std::string command = normalizeCommand(line);
-
+        const std::string command = lvk::core::CommandDispatcher::normalizeCommand(line);
         if (command.empty()) {
             continue;
         }
 
-        if (command == "help" || command == "?") {
-            printHelp();
-            continue;
-        }
-
-        if (command == "version") {
-            std::cout << "AI-Agent-LVK version " << AI_AGENT_LVK_VERSION << "\n";
-            continue;
-        }
-
-        if (command == "update") {
-            const auto result = lvk::update::UpdateManager::launchCheck();
-            if (result.ok) {
-                std::cout << result.message << "\n";
-            } else {
-                std::cerr << "Update error: " << result.message << "\n";
-            }
-            continue;
-        }
-
         if (command == "clear" || command == "cls") {
-            std::system("cls");
+            clearConsole();
             printBanner();
             continue;
         }
@@ -109,10 +94,19 @@ int main() {
             break;
         }
 
-        std::cout << "Unknown command: " << command << "\n";
-        std::cout << "Type 'help' for available commands.\n";
+        const auto result = dispatcher.execute(command);
+        if (result.ok) {
+            std::cout << result.output << "\n";
+        } else {
+            std::cerr << result.output << "\n";
+        }
     }
 
+    apiServer.stop();
+
+#ifdef _WIN32
     updateCloseBridge.stop();
+#endif
+
     return 0;
 }

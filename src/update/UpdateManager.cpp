@@ -1,5 +1,6 @@
 #include "UpdateManager.h"
 
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
@@ -8,8 +9,11 @@
 #include <vector>
 
 namespace fs = std::filesystem;
+#endif
 
 namespace lvk::update {
+
+#ifdef _WIN32
 namespace {
 
 fs::path executableDirectory() {
@@ -27,8 +31,10 @@ std::wstring quote(const std::wstring& value) {
 }
 
 } // namespace
+#endif
 
 LaunchResult UpdateManager::launchCheck() {
+#ifdef _WIN32
     const fs::path appDir = executableDirectory();
     const fs::path updaterPath = appDir / L"LVKUpdater.exe";
     const fs::path configPath = appDir / L"app.update.json";
@@ -87,6 +93,12 @@ LaunchResult UpdateManager::launchCheck() {
         true,
         "Update check started. The app will close automatically only if an update is confirmed and ready to install."
     };
+#else
+    return {
+        false,
+        "LVK-Updater integration is currently Windows-only. The core API/network layer is portable."
+    };
+#endif
 }
 
 } // namespace lvk::update
