@@ -1,18 +1,19 @@
 {
   "appId": "ai-agent-lvk",
   "name": "AI-Agent-LVK",
-  "latestVersion": "0.1.2",
+  "latestVersion": "0.1.3",
   "channel": "stable",
   "mandatory": false,
   "releaseDate": "2026-09-08",
   "mainExe": "AI-Agent-LVK.exe",
   "package": {
-    "url": "https://github.com/vitalya482-glitch/AI-Agent-LVK/releases/download/v0.1.2/AI-Agent-LVK-win-x64.zip",
-    "sha256": "924d9e32b0d481160bd94091874353d9e12d73692f87236cd831a18c7feca2e0",
-    "size": 74181
+    "url": "https://github.com/vitalya482-glitch/AI-Agent-LVK/releases/download/v0.1.3/AI-Agent-LVK-win-x64.zip",
+    "sha256": "2dc6dd618f7b8b2ed56350fa2b20869a0ddf7c66a27d286447c81fbe2bdd67ea",
+    "size": 75152
   },
   "notes": [
-    "GUI checks core connectivity automatically every 2 seconds",
-    "Added Start Core and Restart Core controls"
+    "GUI starts the core in hidden headless mode",
+    "Enter submits commands from the input field",
+    "Added Update button to the GUI"
   ]
 }
