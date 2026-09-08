@@ -1,0 +1,30 @@
+name: Bootstrap release v0.1.1
+
+on:
+  push:
+    branches:
+      - bootstrap-release-v0.1.1
+
+permissions:
+  contents: write
+
+jobs:
+  tag-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create v0.1.1 tag on current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags
+          if git rev-parse v0.1.1 >/dev/null 2>&1; then
+            echo "v0.1.1 already exists"
+            exit 0
+          fi
+          git tag v0.1.1 origin/main
+          git push origin refs/tags/v0.1.1
