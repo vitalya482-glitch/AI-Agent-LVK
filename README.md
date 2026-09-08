@@ -1,51 +1,61 @@
 # AI-Agent-LVK
 
-Minimal native C++ foundation for a future local AI agent runtime.
+Native C++ foundation for a local AI agent runtime.
 
-The first version is intentionally small:
+The project deliberately keeps the runtime small and low-level:
 
-- one Windows console application;
-- no Python, Ollama, Electron or external runtime;
 - C++20 + CMake;
-- application version output;
-- `help`, `version`, `update`, `clear`, `exit` commands;
-- integration with the existing **LVK-Updater**;
-- hidden Win32 update bridge so LVK-Updater can close the console process only when an update is actually ready to install;
-- automatic tagged releases and updater manifest generation through GitHub Actions.
+- no Python runtime, Ollama, Electron or Docker;
+- console core process;
+- local HTTP API;
+- separate minimal Win32 GUI client;
+- LVK-Updater integration;
+- Windows first, while keeping the new network/API layer portable for a later Linux move.
 
 ## Current development version
 
-`0.1.0`
+`0.1.1`
 
-## Project layout
+Latest published release is still `v0.1.0` until a `v0.1.1` tag is created.
+
+## Architecture
 
 ```text
-AI-Agent-LVK/
-├─ .github/workflows/
-│  ├─ windows-build.yml
-│  └─ release.yml
-├─ update/
-│  └─ manifest.json
-├─ CMakeLists.txt
-├─ app.update.json.in
-├─ README.md
-└─ src/
-   ├─ main.cpp
-   └─ update/
-      ├─ UpdateCloseBridge.h
-      ├─ UpdateCloseBridge.cpp
-      ├─ UpdateManager.h
-      └─ UpdateManager.cpp
+Console --------------------+
+                            |
+Win32 GUI -- HTTP ----------+--> CommandDispatcher --> Core
+                            |
+Future Android/Linux client +
 ```
 
-The structure will later grow with separate modules for model runtime, agents, tools, MCP, memory and RAG without changing the console/UI layer.
+The GUI never drives the console through stdin/stdout. Console and HTTP are separate front ends over the same core command dispatcher.
+
+The model/agent layers are not implemented yet. The reserved direction is:
+
+```text
+HTTP / Console
+      |
+CommandDispatcher / Agent API
+      |
+AgentManager
+  |-- MainAgent
+  |-- CodingAgent
+  |-- ResearchAgent
+  `-- ...
+      |
+ModelManager
+      |
+llama.cpp
+```
+
+Multiple logical agents are expected to share one loaded model's weights where practical while keeping separate prompts, contexts, tools, permissions and memory scopes.
 
 ## Build
 
-Requirements:
+Windows requirements:
 
 - Windows 10/11 x64
-- Visual Studio 2022 with Desktop development with C++
+- Visual Studio Build Tools / Visual Studio with Desktop development with C++
 - CMake 3.20+
 
 From a Developer Command Prompt:
@@ -59,81 +69,150 @@ Output:
 
 ```text
 build\Release\AI-Agent-LVK.exe
+build\Release\AI-Agent-LVK-GUI.exe
 build\Release\app.update.json
 ```
 
-`app.update.json` is generated from `app.update.json.in` using the CMake project version.
+`AI-Agent-LVK.exe` is the core/console/API process.
+
+`AI-Agent-LVK-GUI.exe` is intentionally a very simple native Win32 HTTP client.
 
 A custom version can be supplied explicitly:
 
 ```bat
-cmake -S . -B build -A x64 -DAI_AGENT_LVK_VERSION=0.1.1
+cmake -S . -B build -A x64 -DAI_AGENT_LVK_VERSION=0.1.2
 ```
 
-## Automatic releases and manifests
+## Console commands
 
-A Git tag is the release source of truth. Push a semantic version tag in the form `vX.Y.Z`:
+```text
+help
+version
+status
+ping
+update
+clear
+exit
+```
+
+`clear` and `exit` are console-only UI commands. Core commands are executed through `CommandDispatcher`, which is also used by the HTTP API.
+
+## HTTP API v1
+
+The current server binds only to loopback for safety:
+
+```text
+http://127.0.0.1:7842
+```
+
+Endpoints:
+
+```text
+GET  /api/v1/status
+GET  /api/v1/version
+POST /api/v1/command
+POST /api/v1/chat
+```
+
+Example command request:
+
+```json
+{
+  "command": "status"
+}
+```
+
+Example response:
+
+```json
+{
+  "ok": true,
+  "result": "Core: running\nAPI: http://127.0.0.1:7842/api/v1\nModel: not loaded\nAgents: 0"
+}
+```
+
+`POST /api/v1/chat` is reserved now and returns `model_not_loaded` until llama.cpp is integrated.
+
+The HTTP parser is intentionally minimal: short requests, `Content-Length`, connection-close responses and a 1 MiB body limit. It is not intended to be a general web server.
+
+## Cross-platform direction
+
+The HTTP server is separated from socket operations:
+
+```text
+src/net/HttpServer.*
+src/net/PlatformSocket.h
+src/net/platform/WindowsSocket.cpp
+src/net/platform/PosixSocket.cpp
+```
+
+Windows uses Winsock2. POSIX socket support is already present for the future Linux core.
+
+The current Win32 GUI itself is platform-specific by design. A Linux or Android client should use the same HTTP API rather than share Win32 UI code.
+
+Remote/mobile access is not enabled yet. Before binding beyond `127.0.0.1`, authentication, permissions and transport security must be designed.
+
+## Project layout
+
+```text
+AI-Agent-LVK/
+|-- gui/
+|   |-- main.cpp
+|   |-- ApiClient.h
+|   `-- ApiClient.cpp
+|-- src/
+|   |-- api/
+|   |   |-- ApiServer.h
+|   |   `-- ApiServer.cpp
+|   |-- core/
+|   |   |-- AppConfig.h
+|   |   |-- CommandDispatcher.h
+|   |   `-- CommandDispatcher.cpp
+|   |-- net/
+|   |   |-- HttpServer.h
+|   |   |-- HttpServer.cpp
+|   |   |-- PlatformSocket.h
+|   |   `-- platform/
+|   |       |-- WindowsSocket.cpp
+|   |       `-- PosixSocket.cpp
+|   |-- update/
+|   `-- main.cpp
+|-- update/
+|-- CMakeLists.txt
+`-- app.update.json.in
+```
+
+## LVK-Updater
+
+Place the current `LVKUpdater.exe` next to the core executable:
+
+```text
+AI-Agent-LVK.exe
+AI-Agent-LVK-GUI.exe
+LVKUpdater.exe
+app.update.json
+```
+
+The update command launches the existing updater. On Windows the hidden update bridge behavior remains unchanged: the core is closed only after an update is confirmed, downloaded and verified.
+
+## Automatic releases
+
+A semantic version tag such as:
 
 ```bat
 git tag v0.1.1
 git push origin v0.1.1
 ```
 
-GitHub Actions then automatically:
+triggers the Windows release workflow. The release ZIP now includes both `AI-Agent-LVK.exe` and `AI-Agent-LVK-GUI.exe`, plus `app.update.json`.
 
-1. extracts `0.1.1` from the tag;
-2. configures CMake with that exact version;
-3. builds `AI-Agent-LVK.exe` with MSVC;
-4. generates `app.update.json` with the same version;
-5. creates `AI-Agent-LVK-win-x64.zip`;
-6. calculates the ZIP SHA256 and byte size;
-7. creates or updates the matching GitHub Release;
-8. rewrites `update/manifest.json` on `main` with the version, release URL, SHA256, size and release date.
+## Next milestone
 
-This means release metadata does not need to be edited manually.
+After the API/GUI foundation is stable:
 
-## LVK-Updater
-
-Place the current `LVKUpdater.exe` next to `AI-Agent-LVK.exe`:
-
-```text
-AI-Agent-LVK.exe
-LVKUpdater.exe
-app.update.json
-```
-
-The current integration targets LVK-Updater `0.3.1` and starts it in manifest check mode.
-
-Command inside AI-Agent-LVK:
-
-```text
-update
-```
-
-Behavior:
-
-1. AI-Agent-LVK launches LVK-Updater silently.
-2. The console application stays open while the updater checks the manifest.
-3. If there is no update, AI-Agent-LVK continues running.
-4. If an update exists, LVK-Updater asks for confirmation and downloads/verifies it.
-5. Only after successful download and verification does LVK-Updater send `WM_CLOSE` to the hidden update bridge.
-6. AI-Agent-LVK exits, the updater replaces files, and starts `AI-Agent-LVK.exe` again.
-
-Updater logs are written to:
-
-```text
-logs\updater.log
-```
-
-## Next milestones
-
-The next layers are expected to be added independently:
-
-```text
-src/model/     llama.cpp backend and model memory planner
-src/agent/     agent runtime and routing
-src/tools/     native tools
-src/mcp/       MCP client/server
-src/memory/    persistent memory
-src/rag/       local retrieval/indexing
-```
+1. integrate pinned/reproducible `llama.cpp`;
+2. add a clean `ModelEngine` interface;
+3. load a GGUF model;
+4. use CUDA where available;
+5. connect `/api/v1/chat` and console chat to the same model runtime;
+6. only then begin the agent loop/tools layer.
