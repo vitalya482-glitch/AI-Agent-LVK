@@ -5,6 +5,7 @@
 #include "core/AppConfig.h"
 
 #include <cctype>
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -20,11 +21,22 @@ constexpr int kStatusId = 1001;
 constexpr int kHistoryId = 1002;
 constexpr int kInputId = 1003;
 constexpr int kSendId = 1004;
+constexpr int kStartCoreId = 1005;
+constexpr int kRestartCoreId = 1006;
+constexpr UINT_PTR kStatusTimerId = 1;
+constexpr UINT kStatusPollMs = 2000;
+
+constexpr wchar_t kCoreBridgeClass[] = L"AI_AGENT_LVK_UPDATE_BRIDGE";
 
 HWND gStatus = nullptr;
 HWND gHistory = nullptr;
 HWND gInput = nullptr;
 HWND gSend = nullptr;
+HWND gStartCore = nullptr;
+HWND gRestartCore = nullptr;
+
+bool gConnected = false;
+bool gRestartPending = false;
 
 lvk::gui::ApiClient gApi(lvk::core::kDefaultApiHost, lvk::core::kDefaultApiPort);
 
@@ -149,15 +161,111 @@ bool extractJsonString(const std::string& json, std::string_view field, std::str
     return false;
 }
 
+std::filesystem::path executableDirectory() {
+    std::vector<wchar_t> buffer(32768);
+    const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (length == 0 || length >= buffer.size()) {
+        return std::filesystem::current_path();
+    }
+
+    return std::filesystem::path(std::wstring(buffer.data(), length)).parent_path();
+}
+
 void setConnected(bool connected) {
+    gConnected = connected;
+
     SetWindowTextW(gStatus, connected
         ? L"Server: connected to http://127.0.0.1:7842"
-        : L"Server: disconnected (start AI-Agent-LVK.exe first)");
+        : L"Server: disconnected");
+
+    EnableWindow(gStartCore, connected ? FALSE : TRUE);
+    EnableWindow(gRestartCore, TRUE);
+}
+
+bool startCore() {
+    if (gConnected) {
+        appendHistory(L"[core] Core is already running.\r\n\r\n");
+        return true;
+    }
+
+    const std::filesystem::path appDir = executableDirectory();
+    const std::filesystem::path corePath = appDir / L"AI-Agent-LVK.exe";
+
+    std::error_code ec;
+    if (!std::filesystem::exists(corePath, ec)) {
+        appendHistory(L"[core] AI-Agent-LVK.exe was not found next to the GUI.\r\n\r\n");
+        return false;
+    }
+
+    std::wstring commandLine = L"\"" + corePath.wstring() + L"\"";
+    std::vector<wchar_t> mutableCommand(commandLine.begin(), commandLine.end());
+    mutableCommand.push_back(L'\0');
+
+    STARTUPINFOW startupInfo{};
+    startupInfo.cb = sizeof(startupInfo);
+    PROCESS_INFORMATION processInfo{};
+
+    const BOOL created = CreateProcessW(
+        corePath.c_str(),
+        mutableCommand.data(),
+        nullptr,
+        nullptr,
+        FALSE,
+        CREATE_NEW_CONSOLE,
+        nullptr,
+        appDir.c_str(),
+        &startupInfo,
+        &processInfo);
+
+    if (!created) {
+        appendHistory(
+            L"[core] Failed to start AI-Agent-LVK.exe. Win32 error: " +
+            std::to_wstring(GetLastError()) + L"\r\n\r\n");
+        return false;
+    }
+
+    CloseHandle(processInfo.hThread);
+    CloseHandle(processInfo.hProcess);
+
+    appendHistory(L"[core] Start requested. Waiting for API...\r\n\r\n");
+    return true;
+}
+
+void restartCore() {
+    if (!gConnected) {
+        appendHistory(L"[core] Core is not running; starting it instead.\r\n");
+        startCore();
+        return;
+    }
+
+    const HWND bridge = FindWindowW(kCoreBridgeClass, nullptr);
+    if (bridge == nullptr) {
+        appendHistory(L"[core] Could not find the core control bridge.\r\n\r\n");
+        return;
+    }
+
+    if (!PostMessageW(bridge, WM_CLOSE, 0, 0)) {
+        appendHistory(
+            L"[core] Restart request failed. Win32 error: " +
+            std::to_wstring(GetLastError()) + L"\r\n\r\n");
+        return;
+    }
+
+    gRestartPending = true;
+    appendHistory(L"[core] Restart requested. Waiting for shutdown...\r\n\r\n");
 }
 
 void refreshStatus() {
     const auto response = gApi.get("/api/v1/status");
-    setConnected(response.transportOk && response.statusCode >= 200 && response.statusCode < 300);
+    const bool connected =
+        response.transportOk && response.statusCode >= 200 && response.statusCode < 300;
+
+    setConnected(connected);
+
+    if (!connected && gRestartPending) {
+        gRestartPending = false;
+        startCore();
+    }
 }
 
 void sendCommand() {
@@ -198,8 +306,10 @@ void layoutControls(HWND window) {
     const int width = client.right - client.left;
     const int height = client.bottom - client.top;
 
-    MoveWindow(gStatus, 10, 10, width - 20, 20, TRUE);
-    MoveWindow(gHistory, 10, 35, width - 20, height - 95, TRUE);
+    MoveWindow(gStatus, 10, 10, width - 220, 24, TRUE);
+    MoveWindow(gStartCore, width - 200, 8, 85, 26, TRUE);
+    MoveWindow(gRestartCore, width - 105, 8, 95, 26, TRUE);
+    MoveWindow(gHistory, 10, 40, width - 20, height - 100, TRUE);
     MoveWindow(gInput, 10, height - 50, width - 100, 26, TRUE);
     MoveWindow(gSend, width - 80, height - 50, 70, 26, TRUE);
 }
@@ -214,6 +324,18 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             WS_CHILD | WS_VISIBLE,
             0, 0, 0, 0,
             window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kStatusId)), nullptr, nullptr);
+
+        gStartCore = CreateWindowExW(
+            0, L"BUTTON", L"Start Core",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            0, 0, 0, 0,
+            window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kStartCoreId)), nullptr, nullptr);
+
+        gRestartCore = CreateWindowExW(
+            0, L"BUTTON", L"Restart Core",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            0, 0, 0, 0,
+            window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kRestartCoreId)), nullptr, nullptr);
 
         gHistory = CreateWindowExW(
             WS_EX_CLIENTEDGE, L"EDIT", L"",
@@ -234,14 +356,18 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             0, 0, 0, 0,
             window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSendId)), nullptr, nullptr);
 
-        const HWND controls[] = {gStatus, gHistory, gInput, gSend};
+        const HWND controls[] = {
+            gStatus, gStartCore, gRestartCore, gHistory, gInput, gSend
+        };
         for (const HWND control : controls) {
             SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
         }
 
         appendHistory(L"AI-Agent-LVK GUI v" + utf8ToWide(AI_AGENT_LVK_VERSION) + L"\r\n");
         appendHistory(L"Type a core command such as: status, version, ping, help\r\n\r\n");
+
         refreshStatus();
+        SetTimer(window, kStatusTimerId, kStatusPollMs, nullptr);
         SetFocus(gInput);
         return 0;
     }
@@ -250,15 +376,35 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         layoutControls(window);
         return 0;
 
+    case WM_TIMER:
+        if (wParam == kStatusTimerId) {
+            refreshStatus();
+            return 0;
+        }
+        break;
+
     case WM_COMMAND:
         if (LOWORD(wParam) == kSendId && HIWORD(wParam) == BN_CLICKED) {
             sendCommand();
             SetFocus(gInput);
             return 0;
         }
+
+        if (LOWORD(wParam) == kStartCoreId && HIWORD(wParam) == BN_CLICKED) {
+            startCore();
+            SetFocus(gInput);
+            return 0;
+        }
+
+        if (LOWORD(wParam) == kRestartCoreId && HIWORD(wParam) == BN_CLICKED) {
+            restartCore();
+            SetFocus(gInput);
+            return 0;
+        }
         break;
 
     case WM_DESTROY:
+        KillTimer(window, kStatusTimerId);
         PostQuitMessage(0);
         return 0;
     }
