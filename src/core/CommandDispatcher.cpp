@@ -50,7 +50,7 @@ CommandResult CommandDispatcher::execute(const std::string& command) const {
             "  ping     Test the command dispatcher\n"
             "  update   Check for updates with LVK-Updater\n"
             "  model status                 Show model backend/configuration\n"
-            "  model config <ctx> <threads> <gpu_layers>\n"
+            "  model config <ctx> <threads> <gpu_layers> <batch> <kv_gpu> <flash> <mmap> <mlock>\n"
             "  model load <path-to-model.gguf>\n"
             "  chat <message>               Generate a response\n"
             "  clear    Clear the console (console only)\n"
@@ -90,7 +90,13 @@ CommandResult CommandDispatcher::execute(const std::string& command) const {
                << "GPU backend: " << (model.gpuAvailable ? "available" : "not available") << "\n"
                << "Context: " << model.config.contextSize << "\n"
                << "Threads: " << model.config.threadCount << "\n"
-               << "GPU layers: " << model.config.gpuLayers;
+               << "GPU layers: " << model.config.gpuLayers << "\n"
+               << "Batch: " << model.config.batchSize << "\n"
+               << "KV cache: " << (model.config.kvCacheOnGpu ? "GPU" : "CPU/RAM") << "\n"
+               << "Flash Attention: " << (model.config.flashAttention < 0 ? "auto" : model.config.flashAttention == 0 ? "off" : "on") << "\n"
+               << "Memory map: " << (model.config.useMmap ? "on" : "off") << "\n"
+               << "Memory lock: " << (model.config.useMlock ? "on" : "off") << "\n"
+               << "Activity: " << (model.generationActive ? "generating" : "idle");
         if (model.loaded) {
             output << "\nModel layers: " << model.modelLayers
                    << "\nGPU weight sections: " << model.gpuLayersLoaded
@@ -124,10 +130,20 @@ CommandResult CommandDispatcher::execute(const std::string& command) const {
     if (normalized.starts_with(configPrefix)) {
         std::istringstream input(normalized.substr(configPrefix.size()));
         model::ModelConfig config;
-        if (!(input >> config.contextSize >> config.threadCount >> config.gpuLayers) ||
-            (input >> std::ws && !input.eof())) {
-            return {false, "Usage: model config <context> <threads> <gpu_layers>"};
+        int kvGpu = 0;
+        int mmap = 1;
+        int mlock = 0;
+        if (!(input >> config.contextSize >> config.threadCount >> config.gpuLayers)) {
+            return {false, "Usage: model config <context> <threads> <gpu_layers> <batch> <kv_gpu> <flash> <mmap> <mlock>"};
         }
+        if (input >> config.batchSize) {
+            if (!(input >> kvGpu >> config.flashAttention >> mmap >> mlock)) return {false, "Advanced model configuration requires all eight values."};
+        }
+        if (input >> std::ws && !input.eof()) return {false, "Too many model configuration values."};
+        if ((kvGpu != 0 && kvGpu != 1) || (mmap != 0 && mmap != 1) || (mlock != 0 && mlock != 1)) return {false, "Boolean model settings must be 0 or 1."};
+        config.kvCacheOnGpu = kvGpu != 0;
+        config.useMmap = mmap != 0;
+        config.useMlock = mlock != 0;
         const auto result = modelRuntime_.configure(config);
         return {result.ok, result.message};
     }

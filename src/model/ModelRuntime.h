@@ -6,7 +6,16 @@
 
 namespace lvk::model {
 
-struct ModelConfig { int contextSize = 4096; int threadCount = 0; int gpuLayers = 0; };
+struct ModelConfig {
+    int contextSize = 4096;
+    int threadCount = 0;
+    int gpuLayers = 0;
+    int batchSize = 512;
+    bool kvCacheOnGpu = false;
+    int flashAttention = -1; // -1 auto, 0 disabled, 1 enabled
+    bool useMmap = true;
+    bool useMlock = false;
+};
 struct ModelResult { bool ok = false; std::string message; };
 struct ModelStatus {
     bool loaded = false;
@@ -21,6 +30,7 @@ struct ModelStatus {
     int modelLayers = 0;
     int gpuLayersLoaded = 0;
     int contextTokensUsed = 0;
+    bool generationActive = false;
 };
 
 class ModelRuntime {

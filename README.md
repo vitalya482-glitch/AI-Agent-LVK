@@ -2,7 +2,7 @@
 
 Native C++ runtime for local GGUF models on Windows. It uses [llama.cpp](https://github.com/ggml-org/llama.cpp) directly—without Python, Ollama, Electron or Docker—and is designed to grow into a modular local agent runtime.
 
-## v0.1.6
+## v0.1.7
 
 - Direct `llama.cpp` integration as a pinned Git submodule.
 - Load and run local GGUF models from the console, HTTP API, or GUI.
@@ -14,6 +14,8 @@ Native C++ runtime for local GGUF models on Windows. It uses [llama.cpp](https:/
 - **Open Chat** starts a separate chat window: send normal messages without typing `chat` each time.
 - Model Runtime status reports model size, parameter count, layer count, context usage, and CPU/RAM versus GPU/VRAM weight-placement estimates.
 - GUI network calls run outside the Windows UI thread. Status polling, commands and model generation no longer freeze the window; chat shows a generation state while the response is pending.
+- **Model dashboard** is a separate technical status window with a neutral, AIDA-style table: model state, active generation state, layer placement, model parameters, context usage and CPU/RAM versus GPU/VRAM weight estimates.
+- The dashboard exposes direct llama.cpp load/runtime controls: context, CPU threads, GPU layer offload, batch size, KV-cache placement, Flash Attention mode, memory mapping and RAM locking. Applying settings reloads the currently loaded model so the selected placement is actually used.
 
 ## What it is becoming
 
@@ -64,7 +66,15 @@ Start `AI-Agent-LVK-GUI.exe` beside the Core executable.
 2. In **Model runtime**, set context / threads / GPU layers and press **Apply config**. Set GPU layers to `0` for CPU-only. A CUDA-capable build is required for a value above zero.
 3. Press **Choose GGUF** to load a local model, or paste a direct `https://.../*.gguf` link and press **Download GGUF**. Downloads run in the background and are stored next to the app in `models/`.
 4. Press **Open Chat** and send normal messages. The bottom input in the main window remains available for diagnostics and commands.
-5. Press **Refresh status** for placement and runtime information. CPU/RAM and GPU/VRAM weight figures are clearly labelled estimates; the exact buffer accounting will be expanded as the memory planner matures.
+5. Press **Model dashboard** for live placement and runtime information. CPU/RAM and GPU/VRAM weight figures are clearly labelled estimates; the exact buffer accounting will be expanded as the memory planner matures.
+
+### Model dashboard settings
+
+- **GPU layers** selects how many weight sections llama.cpp offloads to the GPU. `0` keeps all weights in CPU/RAM; a value at least as large as the model layer count places all supported weights on the GPU.
+- **KV cache on GPU** controls attention-cache placement. It requires a CUDA-enabled build and consumes additional VRAM as the context grows.
+- **Context**, **threads** and **batch** control context capacity, CPU parallelism and prompt-processing batch size. `0` threads means the runtime chooses a sensible value.
+- **Memory-map model file** uses the operating system file mapping for GGUF weights. **Lock model in RAM** asks llama.cpp to prevent mapped model pages being evicted; use it only when there is enough free RAM.
+- **Flash Attention** is set to Auto by default. Enable it only on a GPU backend that supports it; the dashboard reports any unsupported configuration instead of silently falling back.
 
 Only download models from sources you trust. This first downloader deliberately accepts direct HTTPS `.gguf` files only; it does not yet verify publisher signatures or checksums.
 
@@ -76,7 +86,7 @@ version
 status
 ping
 model status
-model config <context> <threads> <gpu_layers>
+model config <context> <threads> <gpu_layers> [batch kv_gpu flash mmap mlock]
 model load <path-to-model.gguf>
 chat <message>
 update

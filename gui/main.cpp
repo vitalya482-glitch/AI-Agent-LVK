@@ -4,6 +4,7 @@
 
 #include "ApiClient.h"
 #include "ChatWindow.h"
+#include "ModelDashboard.h"
 #include "core/AppConfig.h"
 
 #include <cctype>
@@ -26,11 +27,11 @@ constexpr int kStartCoreId = 1005, kRestartCoreId = 1006, kUpdateId = 1007, kMod
 constexpr int kBrowseModelId = 1009, kModelUrlId = 1010, kDownloadModelId = 1011, kContextId = 1012;
 constexpr int kThreadsId = 1013, kGpuLayersId = 1014, kApplyConfigId = 1015, kCoreFrameId = 1016;
 constexpr int kModelFrameId = 1017, kChatFrameId = 1018, kOpenChatId = 1019;
-constexpr int kDownloadStatusId = 1020, kTelemetryId = 1021;
+constexpr int kDownloadStatusId = 1020, kTelemetryId = 1021, kDashboardId = 1022;
 constexpr UINT_PTR kStatusTimerId = 1;
 constexpr UINT kStatusPollMs = 2000, kDownloadComplete = WM_APP + 1, kDownloadProgress = WM_APP + 2, kAsyncStatus = WM_APP + 3, kAsyncCommand = WM_APP + 4;
 constexpr wchar_t kCoreBridgeClass[] = L"AI_AGENT_LVK_UPDATE_BRIDGE";
-HWND gStatus{}, gHistory{}, gInput{}, gSend{}, gStartCore{}, gRestartCore{}, gUpdate{}, gModelStatus{}, gBrowseModel{}, gModelUrl{}, gDownloadModel{}, gDownloadStatus{}, gTelemetry{}, gOpenChat{}, gContext{}, gThreads{}, gGpuLayers{}, gApplyConfig{}, gCoreFrame{}, gModelFrame{}, gChatFrame{};
+HWND gStatus{}, gHistory{}, gInput{}, gSend{}, gStartCore{}, gRestartCore{}, gUpdate{}, gModelStatus{}, gBrowseModel{}, gModelUrl{}, gDownloadModel{}, gDownloadStatus{}, gTelemetry{}, gOpenChat{}, gDashboard{}, gContext{}, gThreads{}, gGpuLayers{}, gApplyConfig{}, gCoreFrame{}, gModelFrame{}, gChatFrame{};
 bool gConnected = false, gRestartPending = false, gDownloading = false;
 std::atomic<bool> gStatusRequestActive = false;
 HINSTANCE gInstance = nullptr;
@@ -75,7 +76,7 @@ private:
 void downloadModel(HWND window) { if (gDownloading) return; const auto url = getText(gModelUrl), name = downloadFileName(url); if (url.rfind(L"https://", 0) != 0 || name.empty() || !std::wstring_view(name).ends_with(L".gguf")) { appendHistory(L"[download] Use a direct HTTPS link ending in .gguf.\r\n\r\n"); return; } const auto destination = executableDirectory() / L"models" / name; std::error_code ec; std::filesystem::create_directories(destination.parent_path(), ec); if (ec) { appendHistory(L"[download] Could not create the models folder.\r\n\r\n"); return; } gDownloading = true; EnableWindow(gDownloadModel, FALSE); SetWindowTextW(gDownloadModel, L"Downloading..."); SetWindowTextW(gDownloadStatus, L"Download: 0%"); appendHistory(L"[download] Starting: " + url + L"\r\n"); std::thread([window, url, destination] { auto* progress = new DownloadProgress(window); const HRESULT hr = URLDownloadToFileW(nullptr, url.c_str(), destination.c_str(), 0, progress); progress->Release(); auto* message = new std::wstring(SUCCEEDED(hr) ? L"[download] Complete: " + destination.wstring() + L"\r\nChoose GGUF to load it.\r\n\r\n" : L"[download] Failed. HRESULT: " + std::to_wstring(static_cast<long>(hr)) + L"\r\n\r\n"); PostMessageW(window, kDownloadComplete, SUCCEEDED(hr), reinterpret_cast<LPARAM>(message)); }).detach(); }
 void applyConfig(HWND window) { queueCoreCommand(window, L"model config " + getText(gContext) + L" " + getText(gThreads) + L" " + getText(gGpuLayers)); }
 HWND control(HWND parent, const wchar_t* klass, const wchar_t* text, DWORD style, int id) { return CreateWindowExW(0, klass, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0, parent, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), nullptr, nullptr); }
-void layoutControls(HWND w) { RECT r{}; GetClientRect(w, &r); const int width = r.right, height = r.bottom, m = 14; MoveWindow(gStatus,m,m,width-m*2,26,TRUE); MoveWindow(gCoreFrame,m,50,width-m*2,56,TRUE); MoveWindow(gStartCore,m+12,72,105,25,TRUE); MoveWindow(gRestartCore,m+125,72,110,25,TRUE); MoveWindow(gUpdate,m+243,72,90,25,TRUE); MoveWindow(gOpenChat,m+341,72,100,25,TRUE); MoveWindow(gModelFrame,m,116,width-m*2,236,TRUE); MoveWindow(gModelStatus,m+12,138,105,25,TRUE); MoveWindow(gBrowseModel,m+125,138,105,25,TRUE); MoveWindow(gContext,m+12,174,110,24,TRUE); MoveWindow(gThreads,m+130,174,95,24,TRUE); MoveWindow(gGpuLayers,m+233,174,95,24,TRUE); MoveWindow(gApplyConfig,m+336,174,110,24,TRUE); MoveWindow(gModelUrl,m+12,210,width-m*2-142,24,TRUE); MoveWindow(gDownloadModel,width-m-120,210,108,24,TRUE); MoveWindow(gDownloadStatus,m+12,240,width-m*2-24,20,TRUE); MoveWindow(gTelemetry,m+12,264,width-m*2-24,76,TRUE); const int chatY=362; MoveWindow(gChatFrame,m,chatY,width-m*2,height-chatY-m,TRUE); MoveWindow(gHistory,m+12,chatY+24,width-m*2-24,height-chatY-100,TRUE); MoveWindow(gInput,m+12,height-52,width-m*2-102,26,TRUE); MoveWindow(gSend,width-m-82,height-52,70,26,TRUE); }
+void layoutControls(HWND w) { RECT r{}; GetClientRect(w, &r); const int width = r.right, height = r.bottom, m = 14; MoveWindow(gStatus,m,m,width-m*2,26,TRUE); MoveWindow(gCoreFrame,m,50,width-m*2,56,TRUE); MoveWindow(gStartCore,m+12,72,105,25,TRUE); MoveWindow(gRestartCore,m+125,72,110,25,TRUE); MoveWindow(gUpdate,m+243,72,90,25,TRUE); MoveWindow(gOpenChat,m+341,72,100,25,TRUE); MoveWindow(gDashboard,m+449,72,120,25,TRUE); MoveWindow(gModelFrame,m,116,width-m*2,236,TRUE); MoveWindow(gModelStatus,m+12,138,105,25,TRUE); MoveWindow(gBrowseModel,m+125,138,105,25,TRUE); MoveWindow(gContext,m+12,174,110,24,TRUE); MoveWindow(gThreads,m+130,174,95,24,TRUE); MoveWindow(gGpuLayers,m+233,174,95,24,TRUE); MoveWindow(gApplyConfig,m+336,174,110,24,TRUE); MoveWindow(gModelUrl,m+12,210,width-m*2-142,24,TRUE); MoveWindow(gDownloadModel,width-m-120,210,108,24,TRUE); MoveWindow(gDownloadStatus,m+12,240,width-m*2-24,20,TRUE); MoveWindow(gTelemetry,m+12,264,width-m*2-24,76,TRUE); const int chatY=362; MoveWindow(gChatFrame,m,chatY,width-m*2,height-chatY-m,TRUE); MoveWindow(gHistory,m+12,chatY+24,width-m*2-24,height-chatY-100,TRUE); MoveWindow(gInput,m+12,height-52,width-m*2-102,26,TRUE); MoveWindow(gSend,width-m-82,height-52,70,26,TRUE); }
 LRESULT CALLBACK windowProc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_CREATE: {
@@ -88,6 +89,7 @@ LRESULT CALLBACK windowProc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
         gRestartCore = control(w, L"BUTTON", L"Restart Core", BS_PUSHBUTTON, kRestartCoreId);
         gUpdate = control(w, L"BUTTON", L"Update", BS_PUSHBUTTON, kUpdateId);
         gOpenChat = control(w, L"BUTTON", L"Open Chat", BS_PUSHBUTTON, kOpenChatId);
+        gDashboard = control(w, L"BUTTON", L"Model dashboard", BS_PUSHBUTTON, kDashboardId);
         gModelStatus = control(w, L"BUTTON", L"Refresh status", BS_PUSHBUTTON, kModelStatusId);
         gBrowseModel = control(w, L"BUTTON", L"Choose GGUF", BS_PUSHBUTTON, kBrowseModelId);
         gContext = control(w, L"EDIT", L"4096", WS_BORDER | ES_AUTOHSCROLL, kContextId);
@@ -101,7 +103,7 @@ LRESULT CALLBACK windowProc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
         gHistory = control(w, L"EDIT", L"", WS_EX_CLIENTEDGE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, kHistoryId);
         gInput = control(w, L"EDIT", L"", WS_EX_CLIENTEDGE | ES_AUTOHSCROLL, kInputId);
         gSend = control(w, L"BUTTON", L"Send", BS_PUSHBUTTON, kSendId);
-        const HWND controls[] = {gStatus,gCoreFrame,gModelFrame,gChatFrame,gStartCore,gRestartCore,gUpdate,gOpenChat,gModelStatus,gBrowseModel,gContext,gThreads,gGpuLayers,gApplyConfig,gModelUrl,gDownloadModel,gDownloadStatus,gTelemetry,gHistory,gInput,gSend};
+        const HWND controls[] = {gStatus,gCoreFrame,gModelFrame,gChatFrame,gStartCore,gRestartCore,gUpdate,gOpenChat,gDashboard,gModelStatus,gBrowseModel,gContext,gThreads,gGpuLayers,gApplyConfig,gModelUrl,gDownloadModel,gDownloadStatus,gTelemetry,gHistory,gInput,gSend};
         for (const HWND item : controls) SendMessageW(item, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
         appendHistory(L"AI-Agent-LVK v" + utf8ToWide(AI_AGENT_LVK_VERSION) + L"\r\nUse direct HTTPS .gguf URLs (GitHub Releases or Hugging Face resolve links).\r\n\r\n");
         refreshStatus(w); SetTimer(w, kStatusTimerId, kStatusPollMs, nullptr); SetFocus(gInput); return 0;
@@ -121,6 +123,7 @@ LRESULT CALLBACK windowProc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
         case kStartCoreId: startCore(); break;
         case kRestartCoreId: restartCore(); break;
         case kOpenChatId: lvk::gui::openChatWindow(gInstance, w); break;
+        case kDashboardId: lvk::gui::openModelDashboard(gInstance, w); break;
         case kModelStatusId: queueCoreCommand(w, L"model status", true); break;
         case kBrowseModelId: selectModel(w); break;
         case kDownloadModelId: downloadModel(w); break;
