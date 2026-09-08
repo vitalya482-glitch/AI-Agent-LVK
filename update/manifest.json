@@ -1,18 +1,18 @@
 {
   "appId": "ai-agent-lvk",
   "name": "AI-Agent-LVK",
-  "latestVersion": "0.1.1",
+  "latestVersion": "0.1.2",
   "channel": "stable",
   "mandatory": false,
   "releaseDate": "2026-09-08",
   "mainExe": "AI-Agent-LVK.exe",
   "package": {
-    "url": "https://github.com/vitalya482-glitch/AI-Agent-LVK/releases/download/v0.1.1/AI-Agent-LVK-win-x64.zip",
-    "sha256": "5e96a878384426a7579206c58d57649652d56b7a3441058db9aaaf6716e36bc1",
-    "size": 65485
+    "url": "https://github.com/vitalya482-glitch/AI-Agent-LVK/releases/download/v0.1.2/AI-Agent-LVK-win-x64.zip",
+    "sha256": "924d9e32b0d481160bd94091874353d9e12d73692f87236cd831a18c7feca2e0",
+    "size": 74181
   },
   "notes": [
-    "HTTP API and native Win32 GUI",
-    "Cross-platform socket abstraction prepared for Linux"
+    "GUI checks core connectivity automatically every 2 seconds",
+    "Added Start Core and Restart Core controls"
   ]
 }
