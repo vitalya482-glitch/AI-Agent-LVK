@@ -1,19 +1,17 @@
 {
   "appId": "ai-agent-lvk",
   "name": "AI-Agent-LVK",
-  "latestVersion": "0.1.3",
+  "latestVersion": "0.1.4",
   "channel": "stable",
   "mandatory": false,
   "releaseDate": "2026-09-08",
   "mainExe": "AI-Agent-LVK.exe",
   "package": {
-    "url": "https://github.com/vitalya482-glitch/AI-Agent-LVK/releases/download/v0.1.3/AI-Agent-LVK-win-x64.zip",
-    "sha256": "2dc6dd618f7b8b2ed56350fa2b20869a0ddf7c66a27d286447c81fbe2bdd67ea",
-    "size": 75152
+    "url": "https://github.com/vitalya482-glitch/AI-Agent-LVK/releases/download/v0.1.4/AI-Agent-LVK-win-x64.zip",
+    "sha256": "fd2d11a937069754ba3268a3b42fb3d7541c73f9cbbede558238952f62e24300",
+    "size": 1703048
   },
   "notes": [
-    "GUI starts the core in hidden headless mode",
-    "Enter submits commands from the input field",
-    "Added Update button to the GUI"
+    "Automatic release 0.1.4"
   ]
 }
