@@ -5,11 +5,39 @@
 
 #include <algorithm>
 #include <cctype>
+#include <iomanip>
 #include <sstream>
 #include <string_view>
 #include <utility>
 
 namespace lvk::core {
+namespace {
+
+std::string formatInteger(std::uint64_t value) {
+    const std::string digits = std::to_string(value);
+    std::string formatted;
+    formatted.reserve(digits.size() + digits.size() / 3);
+    for (std::size_t index = 0; index < digits.size(); ++index) {
+        if (index != 0 && (digits.size() - index) % 3 == 0) {
+            formatted += ' ';
+        }
+        formatted += digits[index];
+    }
+    return formatted;
+}
+
+std::string formatMiB(std::uint64_t bytes) {
+    std::ostringstream output;
+    output << std::fixed << std::setprecision(2) << static_cast<double>(bytes) / (1024.0 * 1024.0);
+    std::string formatted = output.str();
+    const auto decimal = formatted.find('.');
+    const std::string whole = formatInteger(std::stoull(formatted.substr(0, decimal)));
+    formatted.replace(0, decimal, whole);
+    formatted[whole.size()] = ',';
+    return formatted;
+}
+
+} // namespace
 
 CommandDispatcher::CommandDispatcher(std::string version)
     : version_(std::move(version)) {
@@ -85,7 +113,6 @@ CommandResult CommandDispatcher::execute(const std::string& command) const {
     if (normalized == "model status") {
         const auto model = modelRuntime_.status();
         std::ostringstream output;
-        const auto mib = [](std::uint64_t bytes) { return static_cast<double>(bytes) / (1024.0 * 1024.0); };
         output << "Model: " << (model.loaded ? "loaded" : "not loaded") << "\n"
                << "GPU backend: " << (model.gpuAvailable ? "available" : "not available") << "\n"
                << "Context: " << model.config.contextSize << "\n"
@@ -100,11 +127,11 @@ CommandResult CommandDispatcher::execute(const std::string& command) const {
         if (model.loaded) {
             output << "\nModel layers: " << model.modelLayers
                    << "\nGPU weight sections: " << model.gpuLayersLoaded
-                   << "\nModel size: " << mib(model.modelSizeBytes) << " MiB"
-                   << "\nParameters: " << model.parameterCount
-                   << "\nCPU/RAM weights (estimate): " << mib(model.cpuWeightBytesEstimate) << " MiB"
-                   << "\nGPU/VRAM weights (estimate): " << mib(model.gpuWeightBytesEstimate) << " MiB"
-                   << "\nContext used: " << model.contextTokensUsed << '/' << model.config.contextSize << " tokens";
+                   << "\nModel size: " << formatMiB(model.modelSizeBytes) << " MiB"
+                   << "\nParameters: " << formatInteger(model.parameterCount)
+                   << "\nCPU/RAM weights (estimate): " << formatMiB(model.cpuWeightBytesEstimate) << " MiB"
+                   << "\nGPU/VRAM weights (estimate): " << formatMiB(model.gpuWeightBytesEstimate) << " MiB"
+                   << "\nContext used: " << formatInteger(model.contextTokensUsed) << '/' << formatInteger(model.config.contextSize) << " tokens";
         }
         return {true, output.str()};
     }

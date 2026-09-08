@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-set(AI_AGENT_LVK_VERSION "0.1.7" CACHE STRING "AI-Agent-LVK version")
+set(AI_AGENT_LVK_VERSION "0.1.8" CACHE STRING "AI-Agent-LVK version")
 project(AI-Agent-LVK VERSION ${AI_AGENT_LVK_VERSION} LANGUAGES CXX)
 
 option(AI_AGENT_LVK_ENABLE_CUDA "Enable CUDA when the CUDA Toolkit is installed" ON)

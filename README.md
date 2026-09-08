@@ -2,7 +2,7 @@
 
 Native C++ runtime for local GGUF models on Windows. It uses [llama.cpp](https://github.com/ggml-org/llama.cpp) directly—without Python, Ollama, Electron or Docker—and is designed to grow into a modular local agent runtime.
 
-## v0.1.7
+## v0.1.8
 
 - Direct `llama.cpp` integration as a pinned Git submodule.
 - Load and run local GGUF models from the console, HTTP API, or GUI.
