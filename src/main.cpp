@@ -1,6 +1,7 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <tlhelp32.h>
 #include "update/UpdateCloseBridge.h"
 #endif
 
@@ -8,15 +9,68 @@
 #include "core/AppConfig.h"
 #include "core/CommandDispatcher.h"
 
+#include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <string>
+#include <thread>
 
 #ifndef AI_AGENT_LVK_VERSION
 #define AI_AGENT_LVK_VERSION "0.0.0-dev"
 #endif
 
 namespace {
+
+bool hasArg(int argc, char** argv, const char* wanted) {
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], wanted) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+#ifdef _WIN32
+bool launchedByUpdater() {
+    const DWORD selfPid = GetCurrentProcessId();
+    DWORD parentPid = 0;
+
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            if (entry.th32ProcessID == selfPid) {
+                parentPid = entry.th32ParentProcessID;
+                break;
+            }
+        } while (Process32NextW(snapshot, &entry));
+    }
+
+    bool result = false;
+    if (parentPid != 0) {
+        entry = {};
+        entry.dwSize = sizeof(entry);
+        if (Process32FirstW(snapshot, &entry)) {
+            do {
+                if (entry.th32ProcessID == parentPid) {
+                    result = (_wcsicmp(entry.szExeFile, L"LVKUpdater.exe") == 0);
+                    break;
+                }
+            } while (Process32NextW(snapshot, &entry));
+        }
+    }
+
+    CloseHandle(snapshot);
+    return result;
+}
+#endif
 
 void printBanner() {
     std::cout
@@ -37,14 +91,26 @@ void clearConsole() {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    bool headless = hasArg(argc, argv, "--headless");
+
 #ifdef _WIN32
-    SetConsoleOutputCP(CP_UTF8);
-    SetConsoleCP(CP_UTF8);
-    SetConsoleTitleW(L"AI-Agent-LVK");
+    if (!headless && launchedByUpdater()) {
+        headless = true;
+        if (const HWND console = GetConsoleWindow(); console != nullptr) {
+            ShowWindow(console, SW_HIDE);
+        }
+        FreeConsole();
+    }
+
+    if (!headless) {
+        SetConsoleOutputCP(CP_UTF8);
+        SetConsoleCP(CP_UTF8);
+        SetConsoleTitleW(L"AI-Agent-LVK");
+    }
 
     lvk::update::UpdateCloseBridge updateCloseBridge;
-    if (!updateCloseBridge.start()) {
+    if (!updateCloseBridge.start() && !headless) {
         std::cerr << "Warning: update close bridge could not be started.\n";
     }
 #endif
@@ -55,20 +121,38 @@ int main() {
         lvk::core::kDefaultApiHost,
         lvk::core::kDefaultApiPort);
 
-    printBanner();
+    if (!headless) {
+        printBanner();
+    }
 
-    if (apiServer.start()) {
-        std::cout
-            << "API server listening on http://"
-            << lvk::core::kDefaultApiHost << ':'
-            << lvk::core::kDefaultApiPort
-            << "/api/v1\n\n";
+    const bool apiStarted = apiServer.start();
+    if (apiStarted) {
+        if (!headless) {
+            std::cout
+                << "API server listening on http://"
+                << lvk::core::kDefaultApiHost << ':'
+                << lvk::core::kDefaultApiPort
+                << "/api/v1\n\n";
+        }
     } else {
-        std::cerr
-            << "Warning: API server could not bind to "
-            << lvk::core::kDefaultApiHost << ':'
-            << lvk::core::kDefaultApiPort
-            << ". Console mode will continue.\n\n";
+        if (!headless) {
+            std::cerr
+                << "Warning: API server could not bind to "
+                << lvk::core::kDefaultApiHost << ':'
+                << lvk::core::kDefaultApiPort
+                << ". Console mode will continue.\n\n";
+        } else {
+#ifdef _WIN32
+            updateCloseBridge.stop();
+#endif
+            return 2;
+        }
+    }
+
+    if (headless) {
+        for (;;) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
     }
 
     std::string line;
