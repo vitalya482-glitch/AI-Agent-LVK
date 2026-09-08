@@ -2,7 +2,7 @@
 
 Native C++ runtime for local GGUF models on Windows. It uses [llama.cpp](https://github.com/ggml-org/llama.cpp) directly—without Python, Ollama, Electron or Docker—and is designed to grow into a modular local agent runtime.
 
-## v0.1.5
+## v0.1.6
 
 - Direct `llama.cpp` integration as a pinned Git submodule.
 - Load and run local GGUF models from the console, HTTP API, or GUI.
@@ -13,6 +13,7 @@ Native C++ runtime for local GGUF models on Windows. It uses [llama.cpp](https:/
 - Download progress is shown as a percentage directly below the model URL.
 - **Open Chat** starts a separate chat window: send normal messages without typing `chat` each time.
 - Model Runtime status reports model size, parameter count, layer count, context usage, and CPU/RAM versus GPU/VRAM weight-placement estimates.
+- GUI network calls run outside the Windows UI thread. Status polling, commands and model generation no longer freeze the window; chat shows a generation state while the response is pending.
 
 ## What it is becoming
 

@@ -4,8 +4,10 @@
 #include "core/AppConfig.h"
 
 #include <cctype>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -15,6 +17,9 @@ namespace {
 constexpr int kHistoryId = 2001;
 constexpr int kInputId = 2002;
 constexpr int kSendId = 2003;
+constexpr UINT kChatCompleted = WM_APP + 20;
+
+struct ChatResult { std::wstring text; };
 
 std::wstring utf8ToWide(const std::string& value) {
     if (value.empty()) return {};
@@ -99,15 +104,25 @@ LRESULT CALLBACK proc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
     case WM_COMMAND:
         if (LOWORD(wParam) == kSendId && HIWORD(wParam) == BN_CLICKED) {
             const auto messageText = text(input); if (messageText.empty()) return 0;
-            SetWindowTextW(input, L""); append(history, L"You: " + messageText + L"\r\n");
-            ApiClient api(core::kDefaultApiHost, core::kDefaultApiPort);
-            const auto response = api.postJson("/api/v1/chat", "{\"message\":\"" + jsonEscape(wideToUtf8(messageText)) + "\"}");
-            std::string answer;
-            if (!response.transportOk) answer = "Connection failed: " + response.error;
-            else if (!extractJsonString(response.body, "result", answer) && !extractJsonString(response.body, "error", answer)) answer = response.body;
-            append(history, L"AI: " + utf8ToWide(answer) + L"\r\n\r\n"); SetFocus(input); return 0;
+            SetWindowTextW(input, L""); EnableWindow(input, FALSE); EnableWindow(reinterpret_cast<HWND>(GetPropW(window, L"send")), FALSE);
+            append(history, L"You: " + messageText + L"\r\nAI: generating...\r\n");
+            std::thread([window, messageText] {
+                ApiClient api(core::kDefaultApiHost, core::kDefaultApiPort);
+                const auto response = api.postJson("/api/v1/chat", "{\"message\":\"" + jsonEscape(wideToUtf8(messageText)) + "\"}");
+                std::string answer;
+                if (!response.transportOk) answer = "Connection failed: " + response.error;
+                else if (!extractJsonString(response.body, "result", answer) && !extractJsonString(response.body, "error", answer)) answer = response.body;
+                auto* result = new ChatResult{utf8ToWide(answer)};
+                if (!PostMessageW(window, kChatCompleted, 0, reinterpret_cast<LPARAM>(result))) delete result;
+            }).detach();
+            return 0;
         }
         break;
+    case kChatCompleted: {
+        std::unique_ptr<ChatResult> result(reinterpret_cast<ChatResult*>(lParam));
+        append(history, L"AI: " + result->text + L"\r\n\r\n");
+        EnableWindow(input, TRUE); EnableWindow(reinterpret_cast<HWND>(GetPropW(window, L"send")), TRUE); SetFocus(input); return 0;
+    }
     case WM_DESTROY: RemovePropW(window, L"history"); RemovePropW(window, L"input"); RemovePropW(window, L"send"); return 0;
     }
     return DefWindowProcW(window, message, wParam, lParam);

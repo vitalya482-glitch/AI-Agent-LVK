@@ -7,6 +7,7 @@
 #include "core/AppConfig.h"
 
 #include <cctype>
+#include <atomic>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -27,10 +28,11 @@ constexpr int kThreadsId = 1013, kGpuLayersId = 1014, kApplyConfigId = 1015, kCo
 constexpr int kModelFrameId = 1017, kChatFrameId = 1018, kOpenChatId = 1019;
 constexpr int kDownloadStatusId = 1020, kTelemetryId = 1021;
 constexpr UINT_PTR kStatusTimerId = 1;
-constexpr UINT kStatusPollMs = 2000, kDownloadComplete = WM_APP + 1, kDownloadProgress = WM_APP + 2;
+constexpr UINT kStatusPollMs = 2000, kDownloadComplete = WM_APP + 1, kDownloadProgress = WM_APP + 2, kAsyncStatus = WM_APP + 3, kAsyncCommand = WM_APP + 4;
 constexpr wchar_t kCoreBridgeClass[] = L"AI_AGENT_LVK_UPDATE_BRIDGE";
 HWND gStatus{}, gHistory{}, gInput{}, gSend{}, gStartCore{}, gRestartCore{}, gUpdate{}, gModelStatus{}, gBrowseModel{}, gModelUrl{}, gDownloadModel{}, gDownloadStatus{}, gTelemetry{}, gOpenChat{}, gContext{}, gThreads{}, gGpuLayers{}, gApplyConfig{}, gCoreFrame{}, gModelFrame{}, gChatFrame{};
 bool gConnected = false, gRestartPending = false, gDownloading = false;
+std::atomic<bool> gStatusRequestActive = false;
 HINSTANCE gInstance = nullptr;
 lvk::gui::ApiClient gApi(lvk::core::kDefaultApiHost, lvk::core::kDefaultApiPort);
 
@@ -45,10 +47,12 @@ std::filesystem::path executableDirectory() { std::vector<wchar_t> b(32768); con
 void setConnected(bool connected) { gConnected = connected; SetWindowTextW(gStatus, connected ? L"● Core connected  •  API 127.0.0.1:7842" : L"○ Core disconnected"); EnableWindow(gStartCore, connected ? FALSE : TRUE); EnableWindow(gRestartCore, TRUE); EnableWindow(gUpdate, connected ? TRUE : FALSE); EnableWindow(gModelStatus, connected ? TRUE : FALSE); EnableWindow(gBrowseModel, connected ? TRUE : FALSE); EnableWindow(gApplyConfig, connected ? TRUE : FALSE); }
 bool startCore() { if (gConnected) { appendHistory(L"[core] Already running.\r\n\r\n"); return true; } const auto dir = executableDirectory(), core = dir / L"AI-Agent-LVK.exe"; std::error_code ec; if (!std::filesystem::exists(core, ec)) { appendHistory(L"[core] AI-Agent-LVK.exe was not found next to the GUI.\r\n\r\n"); return false; } std::wstring line = L"\"" + core.wstring() + L"\" --headless"; std::vector<wchar_t> mutableLine(line.begin(), line.end()); mutableLine.push_back(L'\0'); STARTUPINFOW si{}; si.cb = sizeof(si); si.dwFlags = STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE; PROCESS_INFORMATION pi{}; if (!CreateProcessW(core.c_str(), mutableLine.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, dir.c_str(), &si, &pi)) { appendHistory(L"[core] Start failed; Win32 error: " + std::to_wstring(GetLastError()) + L"\r\n\r\n"); return false; } CloseHandle(pi.hThread); CloseHandle(pi.hProcess); appendHistory(L"[core] Started in background. Waiting for API...\r\n\r\n"); return true; }
 void restartCore() { if (!gConnected) { startCore(); return; } const HWND bridge = FindWindowW(kCoreBridgeClass, nullptr); if (!bridge || !PostMessageW(bridge, WM_CLOSE, 0, 0)) { appendHistory(L"[core] Could not request core shutdown.\r\n\r\n"); return; } gRestartPending = true; appendHistory(L"[core] Restart requested.\r\n\r\n"); }
-void refreshStatus() { const auto r = gApi.get("/api/v1/status"); const bool connected = r.transportOk && r.statusCode >= 200 && r.statusCode < 300; setConnected(connected); if (!connected && gRestartPending) { gRestartPending = false; startCore(); } }
-std::wstring executeCoreCommand(const std::wstring& input, bool echo = true) { if (input.empty()) return {}; if (echo) appendHistory(L"> " + input + L"\r\n"); const auto r = gApi.postJson("/api/v1/command", "{\"command\":\"" + jsonEscape(wideToUtf8(input)) + "\"}"); if (!r.transportOk) { setConnected(false); const auto error = L"[transport error] " + utf8ToWide(r.error); appendHistory(error + L"\r\n\r\n"); return error; } setConnected(true); std::string out; if (!extractJsonString(r.body, "result", out) && !extractJsonString(r.body, "error", out)) out = r.body; const auto result = utf8ToWide(out); appendHistory(result + L"\r\n\r\n"); return result; }
-void sendCommand() { const auto input = getText(gInput); if (!input.empty()) { SetWindowTextW(gInput, L""); executeCoreCommand(input); } }
-void selectModel() { std::vector<wchar_t> f(32768); OPENFILENAMEW d{}; d.lStructSize = sizeof(d); d.hwndOwner = GetActiveWindow(); d.lpstrFilter = L"GGUF models (*.gguf)\0*.gguf\0All files\0*.*\0"; d.lpstrFile = f.data(); d.nMaxFile = static_cast<DWORD>(f.size()); d.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST; if (GetOpenFileNameW(&d)) executeCoreCommand(L"model load \"" + std::wstring(f.data()) + L"\""); }
+struct StatusResult { bool connected = false; };
+struct CommandResult { bool connected = false; bool telemetry = false; std::wstring output; };
+void refreshStatus(HWND window) { bool expected = false; if (!gStatusRequestActive.compare_exchange_strong(expected, true)) return; std::thread([window] { const auto response = gApi.get("/api/v1/status"); auto* result = new StatusResult{response.transportOk && response.statusCode >= 200 && response.statusCode < 300}; gStatusRequestActive = false; if (!PostMessageW(window, kAsyncStatus, 0, reinterpret_cast<LPARAM>(result))) delete result; }).detach(); }
+void queueCoreCommand(HWND window, const std::wstring& input, bool telemetry = false) { if (input.empty()) return; appendHistory(L"> " + input + L"\r\n"); std::thread([window, input, telemetry] { const auto response = gApi.postJson("/api/v1/command", "{\"command\":\"" + jsonEscape(wideToUtf8(input)) + "\"}"); auto* result = new CommandResult; result->connected = response.transportOk; result->telemetry = telemetry; if (!response.transportOk) result->output = L"[transport error] " + utf8ToWide(response.error); else { std::string text; if (!extractJsonString(response.body, "result", text) && !extractJsonString(response.body, "error", text)) text = response.body; result->output = utf8ToWide(text); } if (!PostMessageW(window, kAsyncCommand, 0, reinterpret_cast<LPARAM>(result))) delete result; }).detach(); }
+void sendCommand(HWND window) { const auto input = getText(gInput); if (!input.empty()) { SetWindowTextW(gInput, L""); queueCoreCommand(window, input); } }
+void selectModel(HWND window) { std::vector<wchar_t> f(32768); OPENFILENAMEW d{}; d.lStructSize = sizeof(d); d.hwndOwner = window; d.lpstrFilter = L"GGUF models (*.gguf)\0*.gguf\0All files\0*.*\0"; d.lpstrFile = f.data(); d.nMaxFile = static_cast<DWORD>(f.size()); d.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST; if (GetOpenFileNameW(&d)) queueCoreCommand(window, L"model load \"" + std::wstring(f.data()) + L"\""); }
 std::wstring downloadFileName(const std::wstring& url) { const auto q = url.find_first_of(L"?#"); const auto path = url.substr(0, q); const auto slash = path.find_last_of(L"/"); if (slash == std::wstring::npos || slash + 1 >= path.size()) return {}; const auto name = path.substr(slash + 1); return name.find_first_of(L"\\:") != std::wstring::npos || name.size() > 180 ? L"" : name; }
 class DownloadProgress final : public IBindStatusCallback {
 public:
@@ -69,7 +73,7 @@ private:
     HWND window_ = nullptr;
 };
 void downloadModel(HWND window) { if (gDownloading) return; const auto url = getText(gModelUrl), name = downloadFileName(url); if (url.rfind(L"https://", 0) != 0 || name.empty() || !std::wstring_view(name).ends_with(L".gguf")) { appendHistory(L"[download] Use a direct HTTPS link ending in .gguf.\r\n\r\n"); return; } const auto destination = executableDirectory() / L"models" / name; std::error_code ec; std::filesystem::create_directories(destination.parent_path(), ec); if (ec) { appendHistory(L"[download] Could not create the models folder.\r\n\r\n"); return; } gDownloading = true; EnableWindow(gDownloadModel, FALSE); SetWindowTextW(gDownloadModel, L"Downloading..."); SetWindowTextW(gDownloadStatus, L"Download: 0%"); appendHistory(L"[download] Starting: " + url + L"\r\n"); std::thread([window, url, destination] { auto* progress = new DownloadProgress(window); const HRESULT hr = URLDownloadToFileW(nullptr, url.c_str(), destination.c_str(), 0, progress); progress->Release(); auto* message = new std::wstring(SUCCEEDED(hr) ? L"[download] Complete: " + destination.wstring() + L"\r\nChoose GGUF to load it.\r\n\r\n" : L"[download] Failed. HRESULT: " + std::to_wstring(static_cast<long>(hr)) + L"\r\n\r\n"); PostMessageW(window, kDownloadComplete, SUCCEEDED(hr), reinterpret_cast<LPARAM>(message)); }).detach(); }
-void applyConfig() { executeCoreCommand(L"model config " + getText(gContext) + L" " + getText(gThreads) + L" " + getText(gGpuLayers)); }
+void applyConfig(HWND window) { queueCoreCommand(window, L"model config " + getText(gContext) + L" " + getText(gThreads) + L" " + getText(gGpuLayers)); }
 HWND control(HWND parent, const wchar_t* klass, const wchar_t* text, DWORD style, int id) { return CreateWindowExW(0, klass, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0, parent, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), nullptr, nullptr); }
 void layoutControls(HWND w) { RECT r{}; GetClientRect(w, &r); const int width = r.right, height = r.bottom, m = 14; MoveWindow(gStatus,m,m,width-m*2,26,TRUE); MoveWindow(gCoreFrame,m,50,width-m*2,56,TRUE); MoveWindow(gStartCore,m+12,72,105,25,TRUE); MoveWindow(gRestartCore,m+125,72,110,25,TRUE); MoveWindow(gUpdate,m+243,72,90,25,TRUE); MoveWindow(gOpenChat,m+341,72,100,25,TRUE); MoveWindow(gModelFrame,m,116,width-m*2,236,TRUE); MoveWindow(gModelStatus,m+12,138,105,25,TRUE); MoveWindow(gBrowseModel,m+125,138,105,25,TRUE); MoveWindow(gContext,m+12,174,110,24,TRUE); MoveWindow(gThreads,m+130,174,95,24,TRUE); MoveWindow(gGpuLayers,m+233,174,95,24,TRUE); MoveWindow(gApplyConfig,m+336,174,110,24,TRUE); MoveWindow(gModelUrl,m+12,210,width-m*2-142,24,TRUE); MoveWindow(gDownloadModel,width-m-120,210,108,24,TRUE); MoveWindow(gDownloadStatus,m+12,240,width-m*2-24,20,TRUE); MoveWindow(gTelemetry,m+12,264,width-m*2-24,76,TRUE); const int chatY=362; MoveWindow(gChatFrame,m,chatY,width-m*2,height-chatY-m,TRUE); MoveWindow(gHistory,m+12,chatY+24,width-m*2-24,height-chatY-100,TRUE); MoveWindow(gInput,m+12,height-52,width-m*2-102,26,TRUE); MoveWindow(gSend,width-m-82,height-52,70,26,TRUE); }
 LRESULT CALLBACK windowProc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
@@ -100,25 +104,27 @@ LRESULT CALLBACK windowProc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
         const HWND controls[] = {gStatus,gCoreFrame,gModelFrame,gChatFrame,gStartCore,gRestartCore,gUpdate,gOpenChat,gModelStatus,gBrowseModel,gContext,gThreads,gGpuLayers,gApplyConfig,gModelUrl,gDownloadModel,gDownloadStatus,gTelemetry,gHistory,gInput,gSend};
         for (const HWND item : controls) SendMessageW(item, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
         appendHistory(L"AI-Agent-LVK v" + utf8ToWide(AI_AGENT_LVK_VERSION) + L"\r\nUse direct HTTPS .gguf URLs (GitHub Releases or Hugging Face resolve links).\r\n\r\n");
-        refreshStatus(); SetTimer(w, kStatusTimerId, kStatusPollMs, nullptr); SetFocus(gInput); return 0;
+        refreshStatus(w); SetTimer(w, kStatusTimerId, kStatusPollMs, nullptr); SetFocus(gInput); return 0;
     }
     case WM_GETMINMAXINFO: reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize = {800,800}; return 0;
     case WM_SIZE: layoutControls(w); return 0;
-    case WM_TIMER: if (wp == kStatusTimerId) { refreshStatus(); return 0; } break;
+    case WM_TIMER: if (wp == kStatusTimerId) { refreshStatus(w); return 0; } break;
+    case kAsyncStatus: { std::unique_ptr<StatusResult> result(reinterpret_cast<StatusResult*>(lp)); setConnected(result->connected); if (!result->connected && gRestartPending) { gRestartPending = false; startCore(); } return 0; }
+    case kAsyncCommand: { std::unique_ptr<CommandResult> result(reinterpret_cast<CommandResult*>(lp)); setConnected(result->connected); appendHistory(result->output + L"\r\n\r\n"); if (result->telemetry) SetWindowTextW(gTelemetry, result->output.c_str()); return 0; }
     case kDownloadProgress: SetWindowTextW(gDownloadStatus, (L"Download: " + std::to_wstring(wp) + L"%").c_str()); return 0;
     case kDownloadComplete: { std::unique_ptr<std::wstring> out(reinterpret_cast<std::wstring*>(lp)); gDownloading = false; EnableWindow(gDownloadModel, TRUE); SetWindowTextW(gDownloadModel, L"Download GGUF"); SetWindowTextW(gDownloadStatus, wp ? L"Download: complete" : L"Download: failed"); appendHistory(*out); return 0; }
     case WM_COMMAND:
         if (HIWORD(wp) != BN_CLICKED) break;
         switch (LOWORD(wp)) {
-        case kSendId: sendCommand(); break;
-        case kUpdateId: executeCoreCommand(L"update"); break;
+        case kSendId: sendCommand(w); break;
+        case kUpdateId: queueCoreCommand(w, L"update"); break;
         case kStartCoreId: startCore(); break;
         case kRestartCoreId: restartCore(); break;
         case kOpenChatId: lvk::gui::openChatWindow(gInstance, w); break;
-        case kModelStatusId: SetWindowTextW(gTelemetry, executeCoreCommand(L"model status").c_str()); break;
-        case kBrowseModelId: selectModel(); break;
+        case kModelStatusId: queueCoreCommand(w, L"model status", true); break;
+        case kBrowseModelId: selectModel(w); break;
         case kDownloadModelId: downloadModel(w); break;
-        case kApplyConfigId: applyConfig(); break;
+        case kApplyConfigId: applyConfig(w); break;
         default: break;
         }
         SetFocus(gInput); return 0;
@@ -127,4 +133,4 @@ LRESULT CALLBACK windowProc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(w,msg,wp,lp);
 }
 } // namespace
-int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) { gInstance = instance; const wchar_t name[]=L"AI-Agent-LVK-GUI-Window"; WNDCLASSW c{}; c.lpfnWndProc=windowProc;c.hInstance=instance;c.lpszClassName=name;c.hCursor=LoadCursorW(nullptr,IDC_ARROW);c.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);if(!RegisterClassW(&c))return 1;const HWND w=CreateWindowExW(0,name,L"AI-Agent-LVK",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,900,860,nullptr,nullptr,instance,nullptr);if(!w)return 1;ShowWindow(w,show);UpdateWindow(w);MSG m{};while(GetMessageW(&m,nullptr,0,0)>0){if(m.hwnd==gInput&&m.message==WM_KEYDOWN&&m.wParam==VK_RETURN){sendCommand();continue;}TranslateMessage(&m);DispatchMessageW(&m);}return static_cast<int>(m.wParam);}
+int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) { gInstance = instance; const wchar_t name[]=L"AI-Agent-LVK-GUI-Window"; WNDCLASSW c{}; c.lpfnWndProc=windowProc;c.hInstance=instance;c.lpszClassName=name;c.hCursor=LoadCursorW(nullptr,IDC_ARROW);c.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);if(!RegisterClassW(&c))return 1;const HWND w=CreateWindowExW(0,name,L"AI-Agent-LVK",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,900,860,nullptr,nullptr,instance,nullptr);if(!w)return 1;ShowWindow(w,show);UpdateWindow(w);MSG m{};while(GetMessageW(&m,nullptr,0,0)>0){if(m.hwnd==gInput&&m.message==WM_KEYDOWN&&m.wParam==VK_RETURN){sendCommand(w);continue;}TranslateMessage(&m);DispatchMessageW(&m);}return static_cast<int>(m.wParam);}
