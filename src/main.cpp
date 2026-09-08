@@ -178,7 +178,7 @@ int main(int argc, char** argv) {
             break;
         }
 
-        const auto result = dispatcher.execute(command);
+        const auto result = dispatcher.execute(line);
         if (result.ok) {
             std::cout << result.output << "\n";
         } else {

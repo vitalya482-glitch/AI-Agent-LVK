@@ -1,7 +1,23 @@
 cmake_minimum_required(VERSION 3.20)
 
-set(AI_AGENT_LVK_VERSION "0.1.3" CACHE STRING "AI-Agent-LVK version")
+set(AI_AGENT_LVK_VERSION "0.1.4" CACHE STRING "AI-Agent-LVK version")
 project(AI-Agent-LVK VERSION ${AI_AGENT_LVK_VERSION} LANGUAGES CXX)
+
+option(AI_AGENT_LVK_ENABLE_CUDA "Enable CUDA when the CUDA Toolkit is installed" ON)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static dependencies" FORCE)
+set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
+if(AI_AGENT_LVK_ENABLE_CUDA)
+    find_package(CUDAToolkit QUIET)
+    if(CUDAToolkit_FOUND)
+        set(GGML_CUDA ON CACHE BOOL "" FORCE)
+    endif()
+endif()
+add_subdirectory(third_party/llama.cpp EXCLUDE_FROM_ALL)
 
 find_package(Threads REQUIRED)
 
@@ -16,6 +32,7 @@ set(AI_AGENT_LVK_SOURCES
     src/main.cpp
     src/api/ApiServer.cpp
     src/core/CommandDispatcher.cpp
+    src/model/ModelRuntime.cpp
     src/net/HttpServer.cpp
     src/update/UpdateManager.cpp
 )
@@ -39,7 +56,7 @@ target_compile_definitions(AI-Agent-LVK PRIVATE
     AI_AGENT_LVK_VERSION="${PROJECT_VERSION}"
 )
 
-target_link_libraries(AI-Agent-LVK PRIVATE Threads::Threads)
+target_link_libraries(AI-Agent-LVK PRIVATE Threads::Threads llama)
 
 if(WIN32)
     target_compile_definitions(AI-Agent-LVK PRIVATE
@@ -82,7 +99,7 @@ if(WIN32)
         WIN32_LEAN_AND_MEAN
         AI_AGENT_LVK_VERSION="${PROJECT_VERSION}"
     )
-    target_link_libraries(AI-Agent-LVK-GUI PRIVATE user32 winhttp)
+    target_link_libraries(AI-Agent-LVK-GUI PRIVATE user32 winhttp comdlg32 urlmon)
 
     if(MSVC)
         target_compile_options(AI-Agent-LVK-GUI PRIVATE /W4 /permissive- /utf-8)

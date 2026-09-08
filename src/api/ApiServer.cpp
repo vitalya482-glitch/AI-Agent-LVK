@@ -159,9 +159,11 @@ net::HttpResponse ApiServer::handle(const net::HttpRequest& request) const {
             return jsonResponse(400, "{\"ok\":false,\"error\":\"missing_message\"}");
         }
 
+        const auto result = dispatcher_.chat(message);
         return jsonResponse(
-            503,
-            "{\"ok\":false,\"error\":\"model_not_loaded\",\"message\":\"Chat endpoint is reserved for the model runtime.\"}");
+            result.ok ? 200 : 503,
+            std::string("{\"ok\":") + (result.ok ? "true" : "false") +
+            ",\"result\":\"" + jsonEscape(result.output) + "\"}");
     }
 
     const bool knownPath =
