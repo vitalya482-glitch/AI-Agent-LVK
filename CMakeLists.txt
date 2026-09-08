@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-set(AI_AGENT_LVK_VERSION "0.1.4" CACHE STRING "AI-Agent-LVK version")
+set(AI_AGENT_LVK_VERSION "0.1.5" CACHE STRING "AI-Agent-LVK version")
 project(AI-Agent-LVK VERSION ${AI_AGENT_LVK_VERSION} LANGUAGES CXX)
 
 option(AI_AGENT_LVK_ENABLE_CUDA "Enable CUDA when the CUDA Toolkit is installed" ON)
@@ -83,6 +83,7 @@ add_custom_command(TARGET AI-Agent-LVK POST_BUILD
 
 if(WIN32)
     add_executable(AI-Agent-LVK-GUI WIN32
+        gui/ChatWindow.cpp
         gui/main.cpp
         gui/ApiClient.cpp
     )

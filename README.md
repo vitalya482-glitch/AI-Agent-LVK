@@ -2,7 +2,7 @@
 
 Native C++ runtime for local GGUF models on Windows. It uses [llama.cpp](https://github.com/ggml-org/llama.cpp) directly—without Python, Ollama, Electron or Docker—and is designed to grow into a modular local agent runtime.
 
-## v0.1.4
+## v0.1.5
 
 - Direct `llama.cpp` integration as a pinned Git submodule.
 - Load and run local GGUF models from the console, HTTP API, or GUI.
@@ -10,6 +10,9 @@ Native C++ runtime for local GGUF models on Windows. It uses [llama.cpp](https:/
 - GUI can choose an existing `.gguf` file or download one by direct HTTPS URL into `models/`. This works with GitHub Release assets and direct Hugging Face `resolve` URLs.
 - Configure context size, CPU thread count and GPU-offloaded layer count before loading a model.
 - CUDA is used automatically when the CUDA Toolkit is installed at CMake configure time; otherwise the same build remains CPU-only.
+- Download progress is shown as a percentage directly below the model URL.
+- **Open Chat** starts a separate chat window: send normal messages without typing `chat` each time.
+- Model Runtime status reports model size, parameter count, layer count, context usage, and CPU/RAM versus GPU/VRAM weight-placement estimates.
 
 ## What it is becoming
 
@@ -59,7 +62,8 @@ Start `AI-Agent-LVK-GUI.exe` beside the Core executable.
 1. Press **Start Core**.
 2. In **Model runtime**, set context / threads / GPU layers and press **Apply config**. Set GPU layers to `0` for CPU-only. A CUDA-capable build is required for a value above zero.
 3. Press **Choose GGUF** to load a local model, or paste a direct `https://.../*.gguf` link and press **Download GGUF**. Downloads run in the background and are stored next to the app in `models/`.
-4. Enter `chat <your message>` in the bottom field, or use `model status` to inspect the active configuration.
+4. Press **Open Chat** and send normal messages. The bottom input in the main window remains available for diagnostics and commands.
+5. Press **Refresh status** for placement and runtime information. CPU/RAM and GPU/VRAM weight figures are clearly labelled estimates; the exact buffer accounting will be expanded as the memory planner matures.
 
 Only download models from sources you trust. This first downloader deliberately accepts direct HTTPS `.gguf` files only; it does not yet verify publisher signatures or checksums.
 

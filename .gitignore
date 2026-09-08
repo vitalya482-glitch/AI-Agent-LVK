@@ -1,5 +1,6 @@
 # CMake / Visual Studio
 build/
+build-*/
 out/
 .vs/
 CMakeFiles/

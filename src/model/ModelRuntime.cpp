@@ -32,7 +32,26 @@ ModelResult ModelRuntime::load(const std::string& path) {
     return {true, "Model loaded: " + impl_->description};
 }
 void ModelRuntime::unload() { if (impl_->context) { llama_free(impl_->context); impl_->context = nullptr; } if (impl_->model) { llama_model_free(impl_->model); impl_->model = nullptr; } impl_->path.clear(); impl_->description.clear(); }
-ModelStatus ModelRuntime::status() const { return {impl_->model != nullptr, llama_supports_gpu_offload(), impl_->path, impl_->description, impl_->config}; }
+ModelStatus ModelRuntime::status() const {
+    ModelStatus result;
+    result.loaded = impl_->model != nullptr;
+    result.gpuAvailable = llama_supports_gpu_offload();
+    result.path = impl_->path;
+    result.description = impl_->description;
+    result.config = impl_->config;
+    if (!impl_->model) return result;
+    result.modelSizeBytes = llama_model_size(impl_->model);
+    result.parameterCount = llama_model_n_params(impl_->model);
+    result.modelLayers = llama_model_n_layer(impl_->model);
+    const int weightSections = std::max(1, result.modelLayers + 2);
+    result.gpuLayersLoaded = result.gpuAvailable ? std::min(impl_->config.gpuLayers, weightSections) : 0;
+    result.gpuWeightBytesEstimate = result.modelSizeBytes * static_cast<std::uint64_t>(result.gpuLayersLoaded) / static_cast<std::uint64_t>(weightSections);
+    result.cpuWeightBytesEstimate = result.modelSizeBytes - result.gpuWeightBytesEstimate;
+    if (impl_->context) {
+        result.contextTokensUsed = static_cast<int>(std::max<llama_pos>(0, llama_memory_seq_pos_max(llama_get_memory(impl_->context), 0)));
+    }
+    return result;
+}
 ModelResult ModelRuntime::chat(const std::string& message, std::string& response, int maxTokens) {
     response.clear(); if (!impl_->context || message.empty()) return {false, impl_->context ? "Message is empty." : "No model is loaded."};
     const auto* vocab = llama_model_get_vocab(impl_->model); std::string prompt = message;

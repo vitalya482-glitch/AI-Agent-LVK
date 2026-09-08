@@ -85,11 +85,21 @@ CommandResult CommandDispatcher::execute(const std::string& command) const {
     if (normalized == "model status") {
         const auto model = modelRuntime_.status();
         std::ostringstream output;
+        const auto mib = [](std::uint64_t bytes) { return static_cast<double>(bytes) / (1024.0 * 1024.0); };
         output << "Model: " << (model.loaded ? "loaded" : "not loaded") << "\n"
                << "GPU backend: " << (model.gpuAvailable ? "available" : "not available") << "\n"
                << "Context: " << model.config.contextSize << "\n"
                << "Threads: " << model.config.threadCount << "\n"
                << "GPU layers: " << model.config.gpuLayers;
+        if (model.loaded) {
+            output << "\nModel layers: " << model.modelLayers
+                   << "\nGPU weight sections: " << model.gpuLayersLoaded
+                   << "\nModel size: " << mib(model.modelSizeBytes) << " MiB"
+                   << "\nParameters: " << model.parameterCount
+                   << "\nCPU/RAM weights (estimate): " << mib(model.cpuWeightBytesEstimate) << " MiB"
+                   << "\nGPU/VRAM weights (estimate): " << mib(model.gpuWeightBytesEstimate) << " MiB"
+                   << "\nContext used: " << model.contextTokensUsed << '/' << model.config.contextSize << " tokens";
+        }
         return {true, output.str()};
     }
 
