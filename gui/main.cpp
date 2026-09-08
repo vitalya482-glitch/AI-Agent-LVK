@@ -23,6 +23,7 @@ constexpr int kInputId = 1003;
 constexpr int kSendId = 1004;
 constexpr int kStartCoreId = 1005;
 constexpr int kRestartCoreId = 1006;
+constexpr int kUpdateId = 1007;
 constexpr UINT_PTR kStatusTimerId = 1;
 constexpr UINT kStatusPollMs = 2000;
 
@@ -34,6 +35,7 @@ HWND gInput = nullptr;
 HWND gSend = nullptr;
 HWND gStartCore = nullptr;
 HWND gRestartCore = nullptr;
+HWND gUpdate = nullptr;
 
 bool gConnected = false;
 bool gRestartPending = false;
@@ -180,6 +182,7 @@ void setConnected(bool connected) {
 
     EnableWindow(gStartCore, connected ? FALSE : TRUE);
     EnableWindow(gRestartCore, TRUE);
+    EnableWindow(gUpdate, connected ? TRUE : FALSE);
 }
 
 bool startCore() {
@@ -197,12 +200,15 @@ bool startCore() {
         return false;
     }
 
-    std::wstring commandLine = L"\"" + corePath.wstring() + L"\"";
+    std::wstring commandLine = L"\"" + corePath.wstring() + L"\" --headless";
     std::vector<wchar_t> mutableCommand(commandLine.begin(), commandLine.end());
     mutableCommand.push_back(L'\0');
 
     STARTUPINFOW startupInfo{};
     startupInfo.cb = sizeof(startupInfo);
+    startupInfo.dwFlags = STARTF_USESHOWWINDOW;
+    startupInfo.wShowWindow = SW_HIDE;
+
     PROCESS_INFORMATION processInfo{};
 
     const BOOL created = CreateProcessW(
@@ -211,7 +217,7 @@ bool startCore() {
         nullptr,
         nullptr,
         FALSE,
-        CREATE_NEW_CONSOLE,
+        CREATE_NO_WINDOW,
         nullptr,
         appDir.c_str(),
         &startupInfo,
@@ -227,7 +233,7 @@ bool startCore() {
     CloseHandle(processInfo.hThread);
     CloseHandle(processInfo.hProcess);
 
-    appendHistory(L"[core] Start requested. Waiting for API...\r\n\r\n");
+    appendHistory(L"[core] Started in background. Waiting for API...\r\n\r\n");
     return true;
 }
 
@@ -268,14 +274,14 @@ void refreshStatus() {
     }
 }
 
-void sendCommand() {
-    const std::wstring input = getText(gInput);
+void executeCoreCommand(const std::wstring& input, bool echoCommand) {
     if (input.empty()) {
         return;
     }
 
-    appendHistory(L"> " + input + L"\r\n");
-    SetWindowTextW(gInput, L"");
+    if (echoCommand) {
+        appendHistory(L"> " + input + L"\r\n");
+    }
 
     const std::string command = wideToUtf8(input);
     const std::string body = "{\"command\":\"" + jsonEscape(command) + "\"}";
@@ -299,6 +305,25 @@ void sendCommand() {
     appendHistory(utf8ToWide(message) + L"\r\n\r\n");
 }
 
+void sendCommand() {
+    const std::wstring input = getText(gInput);
+    if (input.empty()) {
+        return;
+    }
+
+    SetWindowTextW(gInput, L"");
+    executeCoreCommand(input, true);
+}
+
+void requestUpdate() {
+    if (!gConnected) {
+        appendHistory(L"[update] Core is not connected. Start Core first.\r\n\r\n");
+        return;
+    }
+
+    executeCoreCommand(L"update", true);
+}
+
 void layoutControls(HWND window) {
     RECT client{};
     GetClientRect(window, &client);
@@ -306,9 +331,10 @@ void layoutControls(HWND window) {
     const int width = client.right - client.left;
     const int height = client.bottom - client.top;
 
-    MoveWindow(gStatus, 10, 10, width - 220, 24, TRUE);
-    MoveWindow(gStartCore, width - 200, 8, 85, 26, TRUE);
-    MoveWindow(gRestartCore, width - 105, 8, 95, 26, TRUE);
+    MoveWindow(gStatus, 10, 10, width - 330, 24, TRUE);
+    MoveWindow(gUpdate, width - 310, 8, 70, 26, TRUE);
+    MoveWindow(gStartCore, width - 230, 8, 100, 26, TRUE);
+    MoveWindow(gRestartCore, width - 120, 8, 110, 26, TRUE);
     MoveWindow(gHistory, 10, 40, width - 20, height - 100, TRUE);
     MoveWindow(gInput, 10, height - 50, width - 100, 26, TRUE);
     MoveWindow(gSend, width - 80, height - 50, 70, 26, TRUE);
@@ -324,6 +350,12 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             WS_CHILD | WS_VISIBLE,
             0, 0, 0, 0,
             window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kStatusId)), nullptr, nullptr);
+
+        gUpdate = CreateWindowExW(
+            0, L"BUTTON", L"Update",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            0, 0, 0, 0,
+            window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kUpdateId)), nullptr, nullptr);
 
         gStartCore = CreateWindowExW(
             0, L"BUTTON", L"Start Core",
@@ -357,14 +389,14 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSendId)), nullptr, nullptr);
 
         const HWND controls[] = {
-            gStatus, gStartCore, gRestartCore, gHistory, gInput, gSend
+            gStatus, gUpdate, gStartCore, gRestartCore, gHistory, gInput, gSend
         };
         for (const HWND control : controls) {
             SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
         }
 
         appendHistory(L"AI-Agent-LVK GUI v" + utf8ToWide(AI_AGENT_LVK_VERSION) + L"\r\n");
-        appendHistory(L"Type a core command such as: status, version, ping, help\r\n\r\n");
+        appendHistory(L"Enter sends commands. Available now: status, version, ping, help, update\r\n\r\n");
 
         refreshStatus();
         SetTimer(window, kStatusTimerId, kStatusPollMs, nullptr);
@@ -386,6 +418,12 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     case WM_COMMAND:
         if (LOWORD(wParam) == kSendId && HIWORD(wParam) == BN_CLICKED) {
             sendCommand();
+            SetFocus(gInput);
+            return 0;
+        }
+
+        if (LOWORD(wParam) == kUpdateId && HIWORD(wParam) == BN_CLICKED) {
+            requestUpdate();
             SetFocus(gInput);
             return 0;
         }
@@ -451,6 +489,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
 
     MSG message{};
     while (GetMessageW(&message, nullptr, 0, 0) > 0) {
+        if (message.hwnd == gInput && message.message == WM_KEYDOWN && message.wParam == VK_RETURN) {
+            sendCommand();
+            SetFocus(gInput);
+            continue;
+        }
+
         TranslateMessage(&message);
         DispatchMessageW(&message);
     }
