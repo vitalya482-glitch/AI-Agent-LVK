@@ -6,6 +6,7 @@
 
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace lvk::gui {
@@ -114,7 +115,7 @@ ApiResponse ApiClient::request(
     const BOOL sent = WinHttpSendRequest(
         requestHandle,
         headers,
-        static_cast<DWORD>(-1L),
+        static_cast<DWORD>(-1),
         bodyData,
         bodyLength,
         bodyLength,

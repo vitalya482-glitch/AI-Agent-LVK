@@ -7,6 +7,7 @@
 #include <cctype>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #ifndef AI_AGENT_LVK_VERSION
@@ -212,32 +213,33 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             0, L"STATIC", L"Server: checking...",
             WS_CHILD | WS_VISIBLE,
             0, 0, 0, 0,
-            window, reinterpret_cast<HMENU>(kStatusId), nullptr, nullptr);
+            window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kStatusId)), nullptr, nullptr);
 
         gHistory = CreateWindowExW(
             WS_EX_CLIENTEDGE, L"EDIT", L"",
             WS_CHILD | WS_VISIBLE | WS_VSCROLL |
             ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
             0, 0, 0, 0,
-            window, reinterpret_cast<HMENU>(kHistoryId), nullptr, nullptr);
+            window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kHistoryId)), nullptr, nullptr);
 
         gInput = CreateWindowExW(
             WS_EX_CLIENTEDGE, L"EDIT", L"",
             WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
             0, 0, 0, 0,
-            window, reinterpret_cast<HMENU>(kInputId), nullptr, nullptr);
+            window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kInputId)), nullptr, nullptr);
 
         gSend = CreateWindowExW(
             0, L"BUTTON", L"Send",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
             0, 0, 0, 0,
-            window, reinterpret_cast<HMENU>(kSendId), nullptr, nullptr);
+            window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSendId)), nullptr, nullptr);
 
-        for (const HWND control : {gStatus, gHistory, gInput, gSend}) {
+        const HWND controls[] = {gStatus, gHistory, gInput, gSend};
+        for (const HWND control : controls) {
             SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
         }
 
-        appendHistory(L"AI-Agent-LVK GUI v" L##AI_AGENT_LVK_VERSION L"\r\n");
+        appendHistory(L"AI-Agent-LVK GUI v" + utf8ToWide(AI_AGENT_LVK_VERSION) + L"\r\n");
         appendHistory(L"Type a core command such as: status, version, ping, help\r\n\r\n");
         refreshStatus();
         SetFocus(gInput);
