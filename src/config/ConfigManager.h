@@ -1,0 +1,36 @@
+#pragma once
+#include <filesystem>
+#include <string>
+#include <vector>
+
+namespace lvk::config {
+struct Profile {
+    std::string name;
+    std::filesystem::path model;
+    int context = 16384, parallel = 1, gpuLayers = 999, cpuMoe = 27;
+    std::string kvK = "q8_0", kvV = "q8_0", tools = "all", toolsRuntime = "docker:ai-cpp-sandbox";
+    bool flashAttention = true;
+};
+struct Settings {
+    std::string llamaCommand = "llama", host = "127.0.0.1";
+    unsigned short port = 8080;
+    std::filesystem::path workspace = LR"(G:\AI\workspace)";
+    std::string dockerImage = "ai-cpp-sandbox";
+    bool autoStartServer = false;
+    std::string selectedProfile;
+    std::vector<Profile> profiles;
+};
+class ConfigManager {
+public:
+    explicit ConfigManager(std::filesystem::path directory);
+    bool load(std::string& error);
+    bool save(std::string& error) const;
+    const Settings& settings() const noexcept { return settings_; }
+    Settings& settings() noexcept { return settings_; }
+    const Profile* selectedProfile() const noexcept;
+    std::filesystem::path path() const { return path_; }
+private:
+    std::filesystem::path path_;
+    Settings settings_;
+};
+}

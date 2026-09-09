@@ -28,5 +28,4 @@ jobs:
           name: AI-Agent-LVK-win-x64
           path: |
             build/Release/AI-Agent-LVK.exe
-            build/Release/AI-Agent-LVK-GUI.exe
             build/Release/app.update.json

@@ -1,118 +1,88 @@
 # AI-Agent-LVK
 
-Native C++ runtime for local GGUF models on Windows. It uses [llama.cpp](https://github.com/ggml-org/llama.cpp) directly—without Python, Ollama, Electron or Docker—and is designed to grow into a modular local agent runtime.
+AI-Agent-LVK is a small Windows launcher and manager for local AI based on the ready-made `llama.cpp` server. It does not run inference itself and does not implement an agent framework. It manages three external pieces: `llama`, a GGUF model, and a Docker sandbox used by llama.cpp tools.
 
-## v0.1.8
+The launcher is a single native Win32 executable. It checks dependencies, starts `llama serve` with a selected profile, captures stdout/stderr, monitors `127.0.0.1:8080`, and opens the llama.cpp Web UI. The updater integration remains available.
 
-- Direct `llama.cpp` integration as a pinned Git submodule.
-- Load and run local GGUF models from the console, HTTP API, or GUI.
-- Native Win32 control-panel GUI: Core, Model Runtime and Chat/command panels; responsive layout with a minimum window size of 800×800.
-- GUI can choose an existing `.gguf` file or download one by direct HTTPS URL into `models/`. This works with GitHub Release assets and direct Hugging Face `resolve` URLs.
-- Configure context size, CPU thread count and GPU-offloaded layer count before loading a model.
-- CUDA is used automatically when the CUDA Toolkit is installed at CMake configure time; otherwise the same build remains CPU-only.
-- Download progress is shown as a percentage directly below the model URL.
-- **Open Chat** starts a separate chat window: send normal messages without typing `chat` each time.
-- Model Runtime status reports model size, parameter count, layer count, context usage, and CPU/RAM versus GPU/VRAM weight-placement estimates.
-- GUI network calls run outside the Windows UI thread. Status polling, commands and model generation no longer freeze the window; chat shows a generation state while the response is pending.
-- **Model dashboard** is a separate technical status window with a neutral, AIDA-style table: model state, active generation state, layer placement, model parameters, context usage and CPU/RAM versus GPU/VRAM weight estimates.
-- The dashboard exposes direct llama.cpp load/runtime controls: context, CPU threads, GPU layer offload, batch size, KV-cache placement, Flash Attention mode, memory mapping and RAM locking. Applying settings reloads the currently loaded model so the selected placement is actually used.
+## Requirements
 
-## What it is becoming
-
-```text
-Console / Win32 GUI / local API
-              |
-      CommandDispatcher
-              |
-        ModelRuntime
-              |
-          llama.cpp
-       CPU RAM / GPU VRAM
-```
-
-The next layers are intentionally separate: agent instances with their own prompts, context, permissions and tools; native tools through one registry; then MCP client/server support as an external interoperability boundary. Multiple agents should be able to share loaded model weights where the llama.cpp API permits it. Linux is a future deployment target for a dedicated server once the runtime is mature.
+- Windows 11 x64
+- `llama` from llama.cpp, either on `PATH` or as an absolute path
+- Docker Desktop with a running Docker Engine
+- A GGUF model
+- NVIDIA GPU/CUDA is recommended for the current Qwen3-Coder profile, but the launcher itself does not require CUDA
 
 ## Build
 
-Requirements: Windows 10/11 x64, Visual Studio Build Tools with C++, CMake 3.20+, and Git with submodule support. CUDA Toolkit is optional.
-
 ```bat
-git clone --recurse-submodules https://github.com/vitalya482-glitch/AI-Agent-LVK.git
-cd AI-Agent-LVK
-call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
 cmake -S . -B build -A x64
 cmake --build build --config Release
 ```
 
-If the repository has already been cloned, initialize the pinned llama.cpp source once:
+The output is `build\Release\AI-Agent-LVK.exe`. The build also copies `app.update.json` and the `docker` folder beside it.
+
+## Configuration
+
+On first start the launcher creates `config.json` beside the executable. Edit it to point at the installed llama command, model, and workspace:
+
+```json
+{
+  "llama_command": "llama",
+  "server_host": "127.0.0.1",
+  "server_port": 8080,
+  "workspace": "G:\\AI\\workspace",
+  "docker_image": "ai-cpp-sandbox",
+  "auto_start_server": false,
+  "selected_profile": "Qwen3-Coder-30B-A3B",
+  "profiles": [
+    {
+      "name": "Qwen3-Coder-30B-A3B",
+      "model": "G:\\AI\\models\\Qwen3-Coder-30B-A3B\\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
+      "context": 16384,
+      "parallel": 1,
+      "gpu_layers": 999,
+      "cpu_moe": 27,
+      "kv_k": "q8_0",
+      "kv_v": "q8_0",
+      "flash_attention": true,
+      "tools": "all",
+      "tools_runtime": "docker:ai-cpp-sandbox"
+    }
+  ]
+}
+```
+
+`llama_command` may also be a full path such as `G:\\AI\\llama.cpp\\llama.exe`. The default bind address is deliberately loopback-only.
+
+The default `Qwen3-Coder-30B-A3B` profile uses a 16384-token context. When an existing `config.json` still has the original default value of 8192 for that profile, the launcher migrates only that context field and preserves the rest of the file. Other user-selected context values are left unchanged.
+
+The GUI also shows system RAM/VRAM and the RAM/VRAM reported for the llama serve process. NVIDIA VRAM is read through the optional driver-provided NVML library; if NVML is unavailable, the launcher shows `VRAM: unavailable` without starting `nvidia-smi` or another helper process.
+
+## Docker sandbox
+
+The repository contains `docker\Dockerfile`. Build it from the launcher directory with the GUI button **Rebuild Sandbox**, or run:
 
 ```bat
-git submodule update --init --recursive
+docker build -t ai-cpp-sandbox docker
 ```
 
-Outputs:
+Docker is used only as the tools sandbox. Inference and CUDA remain native Windows processes.
 
-```text
-build\Release\AI-Agent-LVK.exe
-build\Release\AI-Agent-LVK-GUI.exe
-build\Release\app.update.json
-```
+## Using the launcher
 
-## GUI
+1. Start `AI-Agent-LVK.exe`.
+2. Select a profile.
+3. Make sure the status panel reports `llama`, Docker, the image, model, workspace, and port correctly.
+4. Press **Start AI**.
+5. Press **Open Web UI** to open `http://127.0.0.1:8080`.
+6. Use **Stop** or **Restart** to control only the process launched by this window.
 
-Start `AI-Agent-LVK-GUI.exe` beside the Core executable.
+Logs are shown in the window and written to `logs\launcher.log`; llama stdout/stderr is appended there as well. The workspace is explicit and is not the repository root by default.
 
-1. Press **Start Core**.
-2. In **Model runtime**, set context / threads / GPU layers and press **Apply config**. Set GPU layers to `0` for CPU-only. A CUDA-capable build is required for a value above zero.
-3. Press **Choose GGUF** to load a local model, or paste a direct `https://.../*.gguf` link and press **Download GGUF**. Downloads run in the background and are stored next to the app in `models/`.
-4. Press **Open Chat** and send normal messages. The bottom input in the main window remains available for diagnostics and commands.
-5. Press **Model dashboard** for live placement and runtime information. CPU/RAM and GPU/VRAM weight figures are clearly labelled estimates; the exact buffer accounting will be expanded as the memory planner matures.
+## Architecture
 
-### Model dashboard settings
+`ConfigManager`, `DependencyChecker`, `DockerManager`, `LlamaManager`, `ProcessManager`, `PortChecker`, and `LogManager` are native C++ modules behind a simple Win32 GUI. There is no custom HTTP API, command dispatcher, embedded model engine, agent loop, MCP client, or duplicate tool runtime.
 
-- **GPU layers** selects how many weight sections llama.cpp offloads to the GPU. `0` keeps all weights in CPU/RAM; a value at least as large as the model layer count places all supported weights on the GPU.
-- **KV cache on GPU** controls attention-cache placement. It requires a CUDA-enabled build and consumes additional VRAM as the context grows.
-- **Context**, **threads** and **batch** control context capacity, CPU parallelism and prompt-processing batch size. `0` threads means the runtime chooses a sensible value.
-- **Memory-map model file** uses the operating system file mapping for GGUF weights. **Lock model in RAM** asks llama.cpp to prevent mapped model pages being evicted; use it only when there is enough free RAM.
-- **Flash Attention** is set to Auto by default. Enable it only on a GPU backend that supports it; the dashboard reports any unsupported configuration instead of silently falling back.
+## Updates
 
-Only download models from sources you trust. This first downloader deliberately accepts direct HTTPS `.gguf` files only; it does not yet verify publisher signatures or checksums.
-
-## Commands and API
-
-```text
-help
-version
-status
-ping
-model status
-model config <context> <threads> <gpu_layers> [batch kv_gpu flash mmap mlock]
-model load <path-to-model.gguf>
-chat <message>
-update
-```
-
-The local API binds only to `http://127.0.0.1:7842`:
-
-```text
-GET  /api/v1/status
-GET  /api/v1/version
-POST /api/v1/command
-POST /api/v1/chat
-```
-
-`POST /api/v1/chat` accepts `{"message":"..."}` and now returns a generated response when a model is loaded.
-
-## Releases and updater
-
-Tagging `vX.Y.Z` triggers the Windows release workflow. It builds both executables, produces `AI-Agent-LVK-win-x64.zip`, calculates SHA-256 and package size, creates the GitHub Release, then updates `update/manifest.json` on `main`. The release workflows fetch llama.cpp recursively.
-
-`LVKUpdater.exe` remains a separate companion executable. It checks updates without closing the Core; the Core closes only after the update is confirmed, downloaded and verified.
-
-## Deliberate boundaries
-
-- Runtime code stays C++.
-- llama.cpp is the inference backend, not an HTTP wrapper.
-- Internal modules use native C++ interfaces.
-- MCP will be used later for external tools and clients, not for internal agent-to-agent calls.
-- Remote/mobile access stays disabled until authentication, TLS and tool-permission boundaries exist.
+`LVKUpdater.exe`, `app.update.json`, release packaging, SHA-256 calculation, and `update/manifest.json` generation remain part of the existing release flow. Releases are created from semantic version tags `vX.Y.Z`.

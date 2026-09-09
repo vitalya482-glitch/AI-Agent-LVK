@@ -16,7 +16,7 @@ LRESULT CALLBACK bridgeWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM
         // update and the downloaded package has passed verification.
         std::fflush(nullptr);
         ExitProcess(0);
-        return 0;
+        __assume(0);
 
     case kStopMessage:
         DestroyWindow(hwnd);

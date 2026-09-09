@@ -1,196 +1,64 @@
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <tlhelp32.h>
-#include "update/UpdateCloseBridge.h"
-#endif
-
-#include "api/ApiServer.h"
-#include "core/AppConfig.h"
-#include "core/CommandDispatcher.h"
-
-#include <chrono>
-#include <cstdlib>
-#include <cstring>
-#include <iostream>
+#include <shellapi.h>
+#include <algorithm>
+#include <atomic>
+#include <deque>
+#include <filesystem>
+#include <iomanip>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <sstream>
 #include <string>
-#include <thread>
+#include <utility>
+#include <vector>
+#include "config/ConfigManager.h"
+#include "dependencies/DependencyChecker.h"
+#include "docker/DockerManager.h"
+#include "launcher/LlamaManager.h"
+#include "log/LogManager.h"
+#include "memory/MemoryMonitor.h"
+#include "port/PortChecker.h"
+#include "process/BackgroundWorker.h"
+#include "update/UpdateCloseBridge.h"
+#include "update/UpdateManager.h"
 
 #ifndef AI_AGENT_LVK_VERSION
 #define AI_AGENT_LVK_VERSION "0.0.0-dev"
 #endif
 
 namespace {
+using namespace lvk;
+constexpr int kProfile=100,kStart=101,kStop=102,kRestart=103,kWeb=104,kWorkspace=105,kModels=106,kSandbox=107,kUpdate=108,kLog=109;
+constexpr UINT kStaticTimer=1,kRuntimeTimer=2,kLogTimer=3,kMemoryTimer=4,kStaticResult=WM_APP+1,kRuntimeResult=WM_APP+2,kOperationResult=WM_APP+3,kMemoryResult=WM_APP+4;
+HWND gProfile{},gStatus{},gMemory{},gLog{};std::vector<HWND> gButtons;
+std::unique_ptr<config::ConfigManager> gConfig;std::unique_ptr<log::LogManager> gLogs;std::unique_ptr<process::ProcessManager> gProcess;std::unique_ptr<launcher::LlamaManager> gLlama;std::unique_ptr<update::UpdateCloseBridge> gBridge;std::unique_ptr<process::BackgroundWorker> gWorker;
+std::atomic<bool> gStaticCheckRunning{false},gRuntimeCheckRunning{false},gMemoryCheckRunning{false},gOperationRunning{false};
+std::mutex gLogMutex;std::deque<std::string> gPendingLog;
+std::vector<dependencies::Item> gStaticItems,gRuntimeItems;memory::Snapshot gMemorySnapshot;bool gProcessRunning=false,gVramMessageLogged=false;
 
-bool hasArg(int argc, char** argv, const char* wanted) {
-    for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], wanted) == 0) {
-            return true;
-        }
-    }
-    return false;
+std::filesystem::path appDir(){wchar_t buffer[32768]{};const DWORD n=GetModuleFileNameW(nullptr,buffer,32768);return n?std::filesystem::path(std::wstring(buffer,n)).parent_path():std::filesystem::current_path();}
+std::wstring wide(const std::string& text){return {text.begin(),text.end()};}
+void queueLog(const std::string& text){std::lock_guard lock(gLogMutex);gPendingLog.push_back(text);}
+void flushLog(){std::deque<std::string> pending;{std::lock_guard lock(gLogMutex);pending.swap(gPendingLog);}if(pending.empty()||!gLog)return;std::string text;for(const auto& line:pending){text+=line;text+="\r\n";}const auto wideText=wide(text);const LRESULT length=SendMessageW(gLog,WM_GETTEXTLENGTH,0,0);SendMessageW(gLog,EM_SETSEL,length,length);SendMessageW(gLog,EM_REPLACESEL,FALSE,reinterpret_cast<LPARAM>(wideText.c_str()));const LRESULT lines=SendMessageW(gLog,EM_GETLINECOUNT,0,0);if(lines>8000){const LRESULT position=SendMessageW(gLog,EM_LINEINDEX,lines-6000,0);SendMessageW(gLog,EM_SETSEL,0,position);SendMessageW(gLog,EM_REPLACESEL,FALSE,reinterpret_cast<LPARAM>(L""));}}
+void renderStatus(){std::ostringstream output;for(const auto& item:gStaticItems)output<<item.name<<": "<<(item.ok?"OK":"ERROR")<<" - "<<item.message<<"\r\n";for(const auto& item:gRuntimeItems)output<<item.name<<": "<<(item.ok?"OK":"ERROR")<<" - "<<item.message<<"\r\n";SetWindowTextW(gStatus,wide(output.str()).c_str());}
+struct Snapshot{config::Settings settings;std::optional<config::Profile> profile;};
+Snapshot snapshot(){Snapshot result;result.settings=gConfig->settings();if(const auto* p=gConfig->selectedProfile())result.profile=*p;return result;}
+void requestStatic(HWND window){bool expected=false;if(!gStaticCheckRunning.compare_exchange_strong(expected,true))return;auto state=snapshot();gWorker->submit([window,state=std::move(state)]()mutable{auto items=dependencies::checkStatic(state.settings,state.profile?&*state.profile:nullptr);gStaticCheckRunning=false;PostMessageW(window,kStaticResult,0,reinterpret_cast<LPARAM>(new std::vector<dependencies::Item>(std::move(items))));});}
+void requestRuntime(HWND window){bool expected=false;if(!gRuntimeCheckRunning.compare_exchange_strong(expected,true))return;const auto settings=gConfig->settings();gWorker->submit([window,settings](){const bool running=gLlama->running();auto items=dependencies::checkRuntime(settings,running);gRuntimeCheckRunning=false;auto* result=new std::pair<std::vector<dependencies::Item>,bool>(std::move(items),running);PostMessageW(window,kRuntimeResult,0,reinterpret_cast<LPARAM>(result));});}
+std::string gib(std::uint64_t bytes){std::ostringstream value;value<<std::fixed<<std::setprecision(1)<<(static_cast<double>(bytes)/(1024.0*1024.0*1024.0));return value.str();}
+std::string memoryValue(const std::optional<std::uint64_t>& bytes,const char* unavailable="-"){return bytes?gib(*bytes)+" GB":unavailable;}
+void renderMemory(){if(!gMemory)return;std::ostringstream output;if(gMemorySnapshot.systemRamAvailable){const auto percent=gMemorySnapshot.totalRam?static_cast<unsigned>(gMemorySnapshot.usedRam*100/gMemorySnapshot.totalRam):0;output<<"RAM: "<<gib(gMemorySnapshot.usedRam)<<" / "<<gib(gMemorySnapshot.totalRam)<<" GB ("<<percent<<"%) | Free "<<gib(gMemorySnapshot.availableRam)<<" GB | AI "<<memoryValue(gMemorySnapshot.aiRam)<<"\r\n";}else output<<"RAM: unavailable | AI -\r\n";if(gMemorySnapshot.vramAvailable){const auto percent=gMemorySnapshot.totalVram?static_cast<unsigned>(gMemorySnapshot.usedVram*100/gMemorySnapshot.totalVram):0;output<<"VRAM: "<<gib(gMemorySnapshot.usedVram)<<" / "<<gib(gMemorySnapshot.totalVram)<<" GB ("<<percent<<"%) | Free "<<gib(gMemorySnapshot.availableVram)<<" GB | AI "<<memoryValue(gMemorySnapshot.aiVram,"n/a");}else output<<"VRAM: unavailable | AI unavailable";SetWindowTextW(gMemory,wide(output.str()).c_str());}
+void clearAiMemory(){gMemorySnapshot.aiRam.reset();gMemorySnapshot.aiVram.reset();renderMemory();}
+void requestMemory(HWND window){bool expected=false;if(!gMemoryCheckRunning.compare_exchange_strong(expected,true))return;gWorker->submit([window](){auto result=std::make_unique<memory::Snapshot>(memory::collect(gProcess->processHandle(),gProcess->pid()));gMemoryCheckRunning=false;PostMessageW(window,kMemoryResult,0,reinterpret_cast<LPARAM>(result.release()));});}
+void postOperation(HWND window,std::string message,bool processRunning=false){if(!message.empty()&&gLogs)gLogs->write(message);auto* result=new std::pair<std::string,bool>(std::move(message),processRunning);PostMessageW(window,kOperationResult,0,reinterpret_cast<LPARAM>(result));}
+void startServer(HWND window){if(gOperationRunning.exchange(true)){queueLog("An operation is already running.");return;}const auto state=snapshot();gWorker->submit([window,state](){if(!state.profile){postOperation(window,"No model profile configured.");gOperationRunning=false;return;}std::error_code ec;std::filesystem::create_directories(state.settings.workspace,ec);const auto stat=dependencies::checkStatic(state.settings,&*state.profile);for(const auto& item:stat)if(!item.ok&&(item.name=="llama"||item.name=="Model"||item.name=="Docker image")){postOperation(window,item.message);gOperationRunning=false;return;}const auto runtime=dependencies::checkRuntime(state.settings,false);for(const auto& item:runtime)if(!item.ok&&(item.name=="Docker Engine"||item.name=="Port")){postOperation(window,item.message);gOperationRunning=false;return;}std::string error;const bool started=gLlama->start(state.settings,*state.profile,error);postOperation(window,started?"llama serve started.":error,started);gOperationRunning=false;});}
+void stopServer(HWND window,bool restart){if(gOperationRunning.exchange(true)){queueLog("An operation is already running.");return;}clearAiMemory();const auto state=snapshot();gWorker->submit([window,state,restart](){gLlama->stop();if(restart&&state.profile){std::string error;const auto stat=dependencies::checkStatic(state.settings,&*state.profile);bool valid=true;for(const auto& item:stat)if(!item.ok&&(item.name=="llama"||item.name=="Model"||item.name=="Docker image")){error=item.message;valid=false;break;}const auto runtime=dependencies::checkRuntime(state.settings,false);if(valid)for(const auto& item:runtime)if(!item.ok&&(item.name=="Docker Engine"||item.name=="Port")){error=item.message;valid=false;break;}if(valid){const bool started=gLlama->start(state.settings,*state.profile,error);postOperation(window,started?"llama serve restarted.":error,started);}else{postOperation(window,error);}}else postOperation(window,"llama serve stopped.");gOperationRunning=false;});}
+void rebuildSandbox(HWND window){if(gOperationRunning.exchange(true)){queueLog("An operation is already running.");return;}const auto settings=gConfig->settings();gWorker->submit([window,settings](){docker::DockerManager manager(settings.dockerImage);std::string error;const bool ok=manager.rebuild(appDir()/L"docker",error);postOperation(window,ok?"Docker sandbox rebuilt.":error);gOperationRunning=false;});}
+void checkUpdates(HWND window){if(gOperationRunning.exchange(true)){queueLog("An operation is already running.");return;}gWorker->submit([window](){const auto result=update::UpdateManager::launchCheck();postOperation(window,result.message);gOperationRunning=false;});}
+int buttonTextWidth(HWND button){wchar_t text[128]{};const int length=GetWindowTextW(button,text,static_cast<int>(std::size(text)));HDC dc=GetDC(button);if(!dc)return 105;const auto font=reinterpret_cast<HFONT>(SendMessageW(button,WM_GETFONT,0,0));const auto previous=font?SelectObject(dc,font):nullptr;SIZE size{};GetTextExtentPoint32W(dc,text,length,&size);if(previous)SelectObject(dc,previous);ReleaseDC(button,dc);return std::max(105,static_cast<int>(size.cx)+32);}
+void layout(HWND window){RECT rect{};GetClientRect(window,&rect);const int width=std::max(640L,rect.right),height=std::max(480L,rect.bottom);constexpr int margin=20,buttonTop=20,buttonHeight=28,gap=5,rowGap=5;MoveWindow(gProfile,margin,buttonTop,300,buttonHeight,TRUE);const int toolbarLeft=340,toolbarRight=width-margin;int x=toolbarLeft,y=buttonTop;for(HWND button:gButtons){const int buttonWidth=buttonTextWidth(button);if(x!=toolbarLeft&&x+buttonWidth>toolbarRight){x=toolbarLeft;y+=buttonHeight+rowGap;}MoveWindow(button,x,y,buttonWidth,buttonHeight,TRUE);x+=buttonWidth+gap;}const int contentTop=y+buttonHeight+12;MoveWindow(gStatus,margin,contentTop,width-2*margin,190,TRUE);MoveWindow(gMemory,margin,contentTop+200,width-2*margin,48,TRUE);const int logTop=contentTop+260;MoveWindow(gLog,margin,logTop,width-2*margin,std::max(100,height-logTop-20),TRUE);}
+void openPath(const std::wstring& path){ShellExecuteW(nullptr,L"open",path.c_str(),nullptr,nullptr,SW_SHOWNORMAL);}
+LRESULT CALLBACK windowProc(HWND window,UINT message,WPARAM wParam,LPARAM lParam){switch(message){case WM_CREATE:{gProfile=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST,0,0,0,0,window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(kProfile)),nullptr,nullptr);gStatus=CreateWindowW(L"EDIT",L"Checking dependencies...",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_MULTILINE|ES_READONLY,0,0,0,0,window,nullptr,nullptr,nullptr);gMemory=CreateWindowW(L"STATIC",L"Memory: checking...",WS_CHILD|WS_VISIBLE|WS_BORDER|SS_LEFT,0,0,0,0,window,nullptr,nullptr,nullptr);gLog=CreateWindowW(L"EDIT",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY,0,0,0,0,window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(kLog)),nullptr,nullptr);for(const auto& button:{std::pair{kStart,L"Start AI"},std::pair{kStop,L"Stop"},std::pair{kRestart,L"Restart"},std::pair{kWeb,L"Open Web UI"},std::pair{kWorkspace,L"Open Workspace"},std::pair{kModels,L"Open Model Folder"},std::pair{kSandbox,L"Rebuild Sandbox"},std::pair{kUpdate,L"Check Updates"}})gButtons.push_back(CreateWindowW(L"BUTTON",button.second,WS_CHILD|WS_VISIBLE,0,0,0,0,window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(button.first)),nullptr,nullptr));for(const auto& p:gConfig->settings().profiles){const auto name=wide(p.name);SendMessageW(gProfile,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name.c_str()));}const auto selected=wide(gConfig->settings().selectedProfile);SendMessageW(gProfile,CB_SELECTSTRING,static_cast<WPARAM>(-1),reinterpret_cast<LPARAM>(selected.c_str()));gLogs->setListener([](const std::string& line){queueLog(line);});layout(window);requestStatic(window);requestRuntime(window);requestMemory(window);SetTimer(window,kStaticTimer,5000,nullptr);SetTimer(window,kRuntimeTimer,1000,nullptr);SetTimer(window,kLogTimer,200,nullptr);SetTimer(window,kMemoryTimer,1000,nullptr);queueLog(std::string("AI-Agent-LVK v")+AI_AGENT_LVK_VERSION+" ready.");return 0;}case WM_SIZE:layout(window);return 0;case WM_TIMER:if(wParam==kStaticTimer)requestStatic(window);else if(wParam==kRuntimeTimer)requestRuntime(window);else if(wParam==kLogTimer)flushLog();else if(wParam==kMemoryTimer)requestMemory(window);return 0;case kStaticResult:{std::unique_ptr<std::vector<dependencies::Item>> result(reinterpret_cast<std::vector<dependencies::Item>*>(lParam));gStaticItems=std::move(*result);renderStatus();return 0;}case kRuntimeResult:{std::unique_ptr<std::pair<std::vector<dependencies::Item>,bool>> result(reinterpret_cast<std::pair<std::vector<dependencies::Item>,bool>*>(lParam));gRuntimeItems=std::move(result->first);gProcessRunning=result->second;renderStatus();return 0;}case kMemoryResult:{std::unique_ptr<memory::Snapshot> result(reinterpret_cast<memory::Snapshot*>(lParam));gMemorySnapshot=std::move(*result);if(!gMemorySnapshot.vramAvailable){if(!gVramMessageLogged&&!gMemorySnapshot.vramMessage.empty()){const auto vramMessage=gMemorySnapshot.vramMessage;gWorker->submit([vramMessage](){if(gLogs)gLogs->write(vramMessage);});gVramMessageLogged=true;}}else gVramMessageLogged=false;renderMemory();return 0;}case kOperationResult:{std::unique_ptr<std::pair<std::string,bool>> result(reinterpret_cast<std::pair<std::string,bool>*>(lParam));gProcessRunning=result->second;requestStatic(window);requestRuntime(window);requestMemory(window);return 0;}case WM_COMMAND:if(HIWORD(wParam)==CBN_SELCHANGE&&LOWORD(wParam)==kProfile){const int index=(int)SendMessageW(gProfile,CB_GETCURSEL,0,0);if(index>=0){gConfig->settings().selectedProfile=gConfig->settings().profiles[(size_t)index].name;const auto settings=gConfig->settings();gWorker->submit([settings](){config::ConfigManager manager(appDir());manager.settings()=settings;std::string error;if(!manager.save(error)&&gLogs)gLogs->write(error);});requestStatic(window);}return 0;}if(HIWORD(wParam)!=BN_CLICKED)break;switch(LOWORD(wParam)){case kStart:startServer(window);break;case kStop:stopServer(window,false);break;case kRestart:stopServer(window,true);break;case kWeb:{const auto url=L"http://"+wide(gConfig->settings().host)+L":"+std::to_wstring(gConfig->settings().port);openPath(url);break;}case kWorkspace:openPath(gConfig->settings().workspace.wstring());break;case kModels:if(const auto* p=gConfig->selectedProfile())openPath(p->model.parent_path().wstring());break;case kSandbox:rebuildSandbox(window);break;case kUpdate:checkUpdates(window);break;default:break;}return 0;case WM_DESTROY:KillTimer(window,kStaticTimer);KillTimer(window,kRuntimeTimer);KillTimer(window,kLogTimer);KillTimer(window,kMemoryTimer);PostQuitMessage(0);return 0;}return DefWindowProcW(window,message,wParam,lParam);}
 }
-
-#ifdef _WIN32
-bool launchedByUpdater() {
-    const DWORD selfPid = GetCurrentProcessId();
-    DWORD parentPid = 0;
-
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-
-    PROCESSENTRY32W entry{};
-    entry.dwSize = sizeof(entry);
-
-    if (Process32FirstW(snapshot, &entry)) {
-        do {
-            if (entry.th32ProcessID == selfPid) {
-                parentPid = entry.th32ParentProcessID;
-                break;
-            }
-        } while (Process32NextW(snapshot, &entry));
-    }
-
-    bool result = false;
-    if (parentPid != 0) {
-        entry = {};
-        entry.dwSize = sizeof(entry);
-        if (Process32FirstW(snapshot, &entry)) {
-            do {
-                if (entry.th32ProcessID == parentPid) {
-                    result = (_wcsicmp(entry.szExeFile, L"LVKUpdater.exe") == 0);
-                    break;
-                }
-            } while (Process32NextW(snapshot, &entry));
-        }
-    }
-
-    CloseHandle(snapshot);
-    return result;
-}
-#endif
-
-void printBanner() {
-    std::cout
-        << "========================================\n"
-        << " AI-Agent-LVK v" << AI_AGENT_LVK_VERSION << "\n"
-        << " Native C++ local AI agent foundation\n"
-        << "========================================\n"
-        << "Type 'help' to see available commands.\n\n";
-}
-
-void clearConsole() {
-#ifdef _WIN32
-    std::system("cls");
-#else
-    std::system("clear");
-#endif
-}
-
-} // namespace
-
-int main(int argc, char** argv) {
-    bool headless = hasArg(argc, argv, "--headless");
-
-#ifdef _WIN32
-    if (!headless && launchedByUpdater()) {
-        headless = true;
-        if (const HWND console = GetConsoleWindow(); console != nullptr) {
-            ShowWindow(console, SW_HIDE);
-        }
-        FreeConsole();
-    }
-
-    if (!headless) {
-        SetConsoleOutputCP(CP_UTF8);
-        SetConsoleCP(CP_UTF8);
-        SetConsoleTitleW(L"AI-Agent-LVK");
-    }
-
-    lvk::update::UpdateCloseBridge updateCloseBridge;
-    if (!updateCloseBridge.start() && !headless) {
-        std::cerr << "Warning: update close bridge could not be started.\n";
-    }
-#endif
-
-    lvk::core::CommandDispatcher dispatcher(AI_AGENT_LVK_VERSION);
-    lvk::api::ApiServer apiServer(
-        dispatcher,
-        lvk::core::kDefaultApiHost,
-        lvk::core::kDefaultApiPort);
-
-    if (!headless) {
-        printBanner();
-    }
-
-    const bool apiStarted = apiServer.start();
-    if (apiStarted) {
-        if (!headless) {
-            std::cout
-                << "API server listening on http://"
-                << lvk::core::kDefaultApiHost << ':'
-                << lvk::core::kDefaultApiPort
-                << "/api/v1\n\n";
-        }
-    } else {
-        if (!headless) {
-            std::cerr
-                << "Warning: API server could not bind to "
-                << lvk::core::kDefaultApiHost << ':'
-                << lvk::core::kDefaultApiPort
-                << ". Console mode will continue.\n\n";
-        } else {
-#ifdef _WIN32
-            updateCloseBridge.stop();
-#endif
-            return 2;
-        }
-    }
-
-    if (headless) {
-        for (;;) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-        }
-    }
-
-    std::string line;
-    while (true) {
-        std::cout << "AI> " << std::flush;
-
-        if (!std::getline(std::cin, line)) {
-            break;
-        }
-
-        const std::string command = lvk::core::CommandDispatcher::normalizeCommand(line);
-        if (command.empty()) {
-            continue;
-        }
-
-        if (command == "clear" || command == "cls") {
-            clearConsole();
-            printBanner();
-            continue;
-        }
-
-        if (command == "exit" || command == "quit") {
-            break;
-        }
-
-        const auto result = dispatcher.execute(line);
-        if (result.ok) {
-            std::cout << result.output << "\n";
-        } else {
-            std::cerr << result.output << "\n";
-        }
-    }
-
-    apiServer.stop();
-
-#ifdef _WIN32
-    updateCloseBridge.stop();
-#endif
-
-    return 0;
-}
+int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show){gConfig=std::make_unique<lvk::config::ConfigManager>(appDir());std::string error;if(!gConfig->load(error))MessageBoxA(nullptr,error.c_str(),"Configuration error",MB_ICONERROR);gLogs=std::make_unique<lvk::log::LogManager>(appDir()/L"logs");gProcess=std::make_unique<lvk::process::ProcessManager>();gLlama=std::make_unique<lvk::launcher::LlamaManager>(*gProcess,*gLogs);gBridge=std::make_unique<lvk::update::UpdateCloseBridge>();gWorker=std::make_unique<lvk::process::BackgroundWorker>();gBridge->start();WNDCLASSW klass{};klass.lpfnWndProc=windowProc;klass.hInstance=instance;klass.lpszClassName=L"AI-Agent-LVK-Window";klass.hCursor=LoadCursorW(nullptr,IDC_ARROW);klass.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);RegisterClassW(&klass);HWND window=CreateWindowW(klass.lpszClassName,L"AI-Agent-LVK - llama.cpp launcher",WS_OVERLAPPEDWINDOW,100,100,1320,580,nullptr,nullptr,instance,nullptr);if(!window)return 1;ShowWindow(window,show);UpdateWindow(window);MSG message{};while(GetMessageW(&message,nullptr,0,0)>0){TranslateMessage(&message);DispatchMessageW(&message);}gBridge->stop();gWorker.reset();return 0;}
