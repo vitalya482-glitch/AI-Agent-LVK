@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v*.*.*'
+    branches:
+      - 'release/v*.*.*'
 
 permissions:
   contents: write
@@ -13,22 +15,30 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout tagged source
+      - name: Checkout release source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Resolve version from tag
+      - name: Resolve version
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}"
-          if ($tag -notmatch '^v(?<version>\d+\.\d+\.\d+)$') {
-            throw "Release tag must have the form vX.Y.Z. Got: $tag"
+          $refName = "${{ github.ref_name }}"
+          if ($refName -match '^v(?<version>\d+\.\d+\.\d+)$') {
+            $tag = $refName
+            $version = $Matches.version
+          }
+          elseif ($refName -match '^release/(?<tag>v(?<version>\d+\.\d+\.\d+))$') {
+            $tag = $Matches.tag
+            $version = $Matches.version
+          }
+          else {
+            throw "Release ref must be vX.Y.Z or release/vX.Y.Z. Got: $refName"
           }
 
           "TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "VERSION=$($Matches.version)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Configure
         shell: pwsh
@@ -76,7 +86,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           else {
-            gh release create $env:TAG 'AI-Agent-LVK-win-x64.zip' --title "AI-Agent-LVK $env:VERSION" --generate-notes
+            gh release create $env:TAG 'AI-Agent-LVK-win-x64.zip' --target main --title "AI-Agent-LVK $env:VERSION" --generate-notes
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
