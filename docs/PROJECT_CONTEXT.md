@@ -14,7 +14,7 @@ The default endpoint is `127.0.0.1:8080`. `G:\AI\workspace` is the default works
 
 ## Configuration and profiles
 
-`ConfigManager` owns the small JSON-shaped `config.json` beside the executable. Profiles contain model path and llama serve tuning such as context, parallelism, GPU layers, MoE CPU layers, sampling settings, penalties, prompt batching, KV types, flash attention, speculative decoding capability, and tools runtime. The last selected profile is persisted.
+`ConfigManager` owns the small JSON-shaped `config.json` beside the executable. Profiles contain model path and llama serve tuning such as context, parallelism, GPU layers, MoE CPU layers, sampling settings, penalties, prompt batching, KV types, Flash Attention mode, speculative decoding capability, and tools runtime. The last selected profile is persisted.
 
 The default `Qwen3-Coder-30B-A3B` profile currently uses:
 
@@ -31,7 +31,7 @@ The default `Qwen3-Coder-30B-A3B` profile currently uses:
 - GPU layers: 999;
 - CPU MoE layers: 27;
 - K/V cache: q8_0;
-- flash attention: on;
+- Flash Attention: on;
 - MTP supported: false;
 - spec type: none;
 - spec draft N max: 2;
@@ -41,6 +41,8 @@ The default `Qwen3-Coder-30B-A3B` profile currently uses:
 ## Model Settings UI
 
 The main launcher toolbar contains a **Model Settings** button. It opens a native Win32 per-profile editor with short explanations beside every currently discussed tuning parameter: context, temperature, top-k, top-p, presence/repeat/frequency penalties, batch size, ubatch size, parallel slots, GPU layers, CPU MoE layers, K/V cache types, Flash Attention, `spec_type`, and `spec_draft_n_max`. Values are persisted to the selected profile and become active after Start/Restart.
+
+Flash Attention is tri-state profile data: `on`, `auto`, or `off`. The current Qwen3-Coder profile uses `on`. `LlamaManager` emits the explicit long-form argument `--flash-attn <mode>`. Existing configs using the older boolean form remain compatible: `true` is loaded as `on`, `false` as `off`. The GUI exposes all three modes in a drop-down so future profiles can use llama.cpp's `auto` behavior when appropriate.
 
 MTP availability is profile capability data, not inferred blindly from a model name. `mtp_supported = false` keeps speculative controls disabled/grey and forces `spec_type = none`; `LlamaManager` does not emit MTP command-line flags. A known MTP GGUF profile such as a future `Qwen3.6-35B-A3B MTP` should set `mtp_supported = true`. Then the GUI enables `none`/`draft-mtp` selection and `spec_draft_n_max`, and `LlamaManager` may emit `--spec-type draft-mtp --spec-draft-n-max N`.
 
