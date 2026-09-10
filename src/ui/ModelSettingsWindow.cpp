@@ -111,7 +111,7 @@ bool saveValues(HWND window, State& s) {
     ok &= parseInt(s.controls[CpuMoe], 0, 100000, updated.cpuMoe);
     updated.kvK = comboValue(s.controls[KvK]);
     updated.kvV = comboValue(s.controls[KvV]);
-    updated.flashAttention = SendMessageW(s.controls[FlashAttention], BM_GETCHECK, 0, 0) == BST_CHECKED;
+    updated.flashAttention = comboValue(s.controls[FlashAttention]);
 
     if (updated.mtpSupported) {
         updated.specType = comboValue(s.controls[SpecType]);
@@ -120,8 +120,12 @@ bool saveValues(HWND window, State& s) {
         updated.specType = "none";
     }
 
-    if (!ok || updated.kvK.empty() || updated.kvV.empty()) {
+    if (!ok || updated.kvK.empty() || updated.kvV.empty() || updated.flashAttention.empty()) {
         MessageBoxW(window, L"One or more model settings are invalid.", L"Invalid settings", MB_OK | MB_ICONWARNING);
+        return false;
+    }
+    if (updated.flashAttention != "on" && updated.flashAttention != "off" && updated.flashAttention != "auto") {
+        MessageBoxW(window, L"Flash Attention must be on, auto, or off.", L"Invalid Flash Attention setting", MB_OK | MB_ICONWARNING);
         return false;
     }
     if (updated.ubatchSize > updated.batchSize) {
@@ -173,10 +177,10 @@ LRESULT CALLBACK proc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
         s->controls[KvV]=addCombo(window,195,y,120,kvTypes,std::size(kvTypes),wide(p.kvV));
         addStatic(window,330,y+2,420,34,L"-ctv. V-cache type; q8_0 is our current balance."); y+=36;
 
+        const wchar_t* flashModes[] = {L"on",L"auto",L"off"};
         addStatic(window,20,y+4,170,20,L"Flash Attention");
-        s->controls[FlashAttention]=CreateWindowW(L"BUTTON",L"Enabled",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,195,y,120,24,window,nullptr,nullptr,nullptr);
-        SendMessageW(s->controls[FlashAttention],BM_SETCHECK,p.flashAttention?BST_CHECKED:BST_UNCHECKED,0);
-        addStatic(window,330,y+2,420,34,L"-fa on/off. Faster and usually more memory-efficient attention."); y+=40;
+        s->controls[FlashAttention]=addCombo(window,195,y,120,flashModes,std::size(flashModes),wide(p.flashAttention));
+        addStatic(window,330,y+2,420,34,L"--flash-attn on/auto/off. ON is our default for Qwen on NVIDIA; AUTO lets llama.cpp decide."); y+=40;
 
         const wchar_t* specTypes[] = {L"none",L"draft-mtp"};
         addStatic(window,20,y+4,170,20,L"Speculative type");
