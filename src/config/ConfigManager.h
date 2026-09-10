@@ -9,6 +9,7 @@ struct Profile {
     std::filesystem::path model;
     int context = 32768, parallel = 1, gpuLayers = 999, cpuMoe = 27;
     double temperature = 0.3;
+    double presencePenalty = 0.0, repeatPenalty = 1.0, frequencyPenalty = 0.0;
     std::string kvK = "q8_0", kvV = "q8_0", tools = "all", toolsRuntime = "docker:ai-cpp-sandbox";
     bool flashAttention = true;
 };
