@@ -37,6 +37,7 @@ target_compile_definitions(AI-Agent-LVK PRIVATE
 target_link_libraries(AI-Agent-LVK PRIVATE user32 shell32 shlwapi winhttp ws2_32 psapi)
 set_target_properties(AI-Agent-LVK PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/Release"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Release"
 )
 
 if(MSVC)
