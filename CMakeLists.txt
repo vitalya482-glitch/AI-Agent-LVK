@@ -34,7 +34,7 @@ target_compile_definitions(AI-Agent-LVK PRIVATE
     UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN
     AI_AGENT_LVK_VERSION="${PROJECT_VERSION}"
 )
-target_link_libraries(AI-Agent-LVK PRIVATE user32 shell32 shlwapi winhttp ws2_32 psapi)
+target_link_libraries(AI-Agent-LVK PRIVATE user32 shell32 shlwapi winhttp ws2_32 psapi comctl32)
 set_target_properties(AI-Agent-LVK PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/Release"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Release"
