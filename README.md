@@ -43,7 +43,7 @@ On first start the launcher creates `config.json` beside the executable. The cur
   "ubatch_size": 253,
   "kv_k": "q8_0",
   "kv_v": "q8_0",
-  "flash_attention": true,
+  "flash_attention": "on",
   "mtp_supported": false,
   "spec_type": "none",
   "spec_draft_n_max": 2,
@@ -60,6 +60,7 @@ The main window has a **Model Settings** button. It opens a native Win32 page fo
 
 The current coding defaults are:
 
+- `context = 32768`
 - `temperature = 0.3`
 - `top_k = 20`
 - `top_p = 0.95`
@@ -68,8 +69,19 @@ The current coding defaults are:
 - `frequency_penalty = 0.0`
 - `batch_size = 512`
 - `ubatch_size = 253`
+- `flash_attention = on`
 
 The repetition-related penalties are intentionally neutral for coding because source code naturally repeats identifiers, keywords, paths, JSON keys, and command fragments.
+
+### Flash Attention
+
+Flash Attention is stored per model profile as `on`, `auto`, or `off` and is passed directly to llama.cpp as:
+
+```text
+--flash-attn on|auto|off
+```
+
+The Model Settings page uses a drop-down instead of a boolean checkbox. The current Qwen3-Coder profile defaults to `on`; `auto` allows llama.cpp to decide based on the active model/backend, and `off` remains available for compatibility troubleshooting. Legacy configs that stored `flash_attention` as JSON `true` or `false` are read as `on` or `off` respectively.
 
 ### MTP speculative decoding
 
