@@ -1,4 +1,5 @@
 #include "ui/ModelSettingsWindow.h"
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <iomanip>
@@ -227,8 +228,8 @@ bool showModelSettings(HWND parent, config::Profile& profile, std::string& error
     RECT pr{},wr{};
     if(parent&&GetWindowRect(parent,&pr)&&GetWindowRect(window,&wr)){
         const int width=wr.right-wr.left,height=wr.bottom-wr.top;
-        const int x=std::max(10,pr.left+((pr.right-pr.left)-width)/2);
-        const int y=std::max(10,pr.top+((pr.bottom-pr.top)-height)/2);
+        const int x=std::max(10,static_cast<int>(pr.left+((pr.right-pr.left)-width)/2));
+        const int y=std::max(10,static_cast<int>(pr.top+((pr.bottom-pr.top)-height)/2));
         SetWindowPos(window,nullptr,x,y,0,0,SWP_NOSIZE|SWP_NOZORDER);
     }
     if(parent)EnableWindow(parent,FALSE);
