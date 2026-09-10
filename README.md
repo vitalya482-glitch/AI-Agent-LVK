@@ -8,100 +8,148 @@ The launcher is a single native Win32 executable. It checks dependencies, starts
 
 - Windows 11 x64
 - `llama` from llama.cpp, either on `PATH` or as an absolute path
-- Docker Desktop with a running Docker Engine
+- Docker Desktop is needed for llama.cpp tools sandboxing; **Start AI** can launch the model while Docker is still starting, and **Start Docker** can start/wait for Docker Engine explicitly
 - A GGUF model
 - NVIDIA GPU/CUDA is recommended for the current Qwen3-Coder profile, but the launcher itself does not require CUDA
 
 ## Build
 
 ```bat
+call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
 cmake -S . -B build -A x64
 cmake --build build --config Release
 ```
 
 The output is `build\Release\AI-Agent-LVK.exe`. The build also copies `app.update.json` and the `docker` folder beside it.
 
-## Configuration
+Optional native tests (fixtures only; no 20-GB download):
 
-On first start the launcher creates `config.json` beside the executable. The current coding profile stores runtime and sampling tuning per model:
+```bat
+cmake -S . -B build-tests -A x64 -DLVK_BUILD_TESTS=ON
+cmake --build build-tests --config Release
+ctest --test-dir build-tests -C Release --output-on-failure
+```
+
+Tests exercise migration, persistence, Unicode paths, per-model command lines,
+owned hidden child processes, real WinHTTP loopback transfers, SHA-256, redirects,
+truncation, cancellation, partial restart, overwrite protection and disk preflight.
+Plain HTTP is allowed only on numeric `127.0.0.1` for these transport fixtures.
+The test executable is not included in release packaging.
+
+## Models and configuration
+
+The toolbar's ComboBox lists **registered installed models**, not the download catalog.
+**Add Existing Model** uses the Windows GGUF file picker, validates an existing regular
+file on a worker, and registers its absolute Unicode path without copying it.
+**Download Model** opens a separate, modeless Win32 window: select a catalog entry,
+choose an existing folder with **Browse...**, and explicitly press **Download**.
+The last chosen download folder is displayed as a suggestion, never used silently.
+
+The built-in catalog is in `src/models/ModelCatalog.cpp`. Its first entry is
+[Qwen3.6-35B-A3B Q4_K_M](https://huggingface.co/ggml-org/Qwen3.6-35B-A3B-GGUF/blob/main/Qwen3.6-35B-A3B-Q4_K_M.gguf),
+20,419,565,568 bytes. The HTTPS resolve URL and SHA-256 are pinned in the entry.
+Adding another model requires a catalog entry, not changes to the main window.
+Catalog files are data-only: downloaded files are never executed.
+
+`config.json` is created beside the executable. Schema 2 contains:
+
+- `installed_models`: registrations with stable `id`, `display_name`, absolute `path`,
+  `family`, `quant`, and all per-model tuning;
+- `active_model_id`: the current ComboBox selection;
+- `last_model_download_directory`: convenience value shown before Download;
+- existing launcher settings (`llama_command`, `server_host`, `server_port`,
+  `workspace_path`, `docker_image`, `auto_start_server`). The old `workspace`
+  key is still accepted during migration.
+
+The first-run workspace is `<launcher-directory>\workspace` when that directory
+is writable; protected installations fall back to `%LOCALAPPDATA%\AI-Agent-LVK\workspace`.
+An existing configured workspace is preserved. **Change Workspace** selects and
+persists another directory, and **Open Workspace** opens the persisted directory.
+
+Legacy `profiles` / `selected_profile` and single `model_path` configs migrate
+automatically. The active Qwen3-Coder and all stored tuning are preserved, including
+8192/16384 contexts: the old automatic promotion to 32768 has been removed.
+The original bytes remain in `config.json.pre-models.bak`. Invalid JSON is reported
+without overwriting the original. Updates write a temporary config and replace it
+atomically; the release package intentionally does not overwrite user configuration.
+On a first run without config, the old default Qwen3-Coder path is registered only
+if its file exists; otherwise the list starts empty.
+
+A missing file stays registered and is labelled **[Missing]**. Start offers **Locate**,
+**Remove from list**, or **Cancel**. Locate changes only the path, preserving tuning.
+Remove from List never deletes a GGUF or stops a running server. Open Model Folder
+always uses the selected model's saved parent directory. Selecting another model
+does not switch a running server: press Restart to apply the selection.
+
+### Download safety and cancellation
+
+The download worker performs folder, write-access and free-space checks (model size
+plus at least 5% / 512 MiB reserve). Existing final files require **Use Existing**
+(size/hash verification), **Re-download**, or **Cancel**. Existing partial files
+require explicit **Restart** or **Cancel**; HTTP Range resume is not yet implemented.
+
+WinHTTP uses native asynchronous requests, HTTPS certificate validation, limited
+redirects and no HTTPS-to-HTTP downgrade. The owned worker sends progress through
+PostMessage approximately every 150 ms: actual bytes, Content-Length percentage,
+average speed and elapsed time. Without Content-Length the progress bar is indeterminate.
+
+Data streams into the chosen `.gguf.part` file. Only after checking GGUF magic,
+size, and SHA-256, flushing and closing the file, does a same-directory atomic rename
+publish the final GGUF and register it. A failed replacement leaves the old final
+file untouched. Filenames come only from validated catalog entries; path traversal,
+executable extensions, hard-linked/reparse-point partial files and unapproved
+overwrites are rejected.
+
+Cancel sets an atomic flag; the worker closes the asynchronous request and retains
+its callback context/read buffer until WinHTTP's final HANDLE_CLOSING notification.
+The main window remains responsive. Partial files remain unregistered. Shutdown,
+including an updater close request, cancels downloads and drains the owned workers
+before destroying their windows. There are no detached download threads.
+
+## Model Settings
+
+Settings, Coding / Creative / Chaos / Custom presets and the context slider are
+per installed model. Changes apply on the next Start/Restart. Qwen3.6's initial
+profile uses the following editable runtime values:
 
 ```json
 {
-  "name": "Qwen3-Coder-30B-A3B",
-  "model": "G:\\AI\\models\\Qwen3-Coder-30B-A3B\\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
-  "context": 32768,
-  "parallel": 1,
-  "gpu_layers": 999,
-  "cpu_moe": 27,
-  "temperature": 0.3,
-  "top_k": 20,
-  "top_p": 0.95,
-  "presence_penalty": 0.0,
-  "repeat_penalty": 1.0,
-  "frequency_penalty": 0.0,
-  "batch_size": 512,
-  "ubatch_size": 253,
-  "kv_k": "q8_0",
-  "kv_v": "q8_0",
-  "flash_attention": "on",
-  "mtp_supported": false,
-  "spec_type": "none",
-  "spec_draft_n_max": 2,
-  "tools": "all",
-  "tools_runtime": "docker:ai-cpp-sandbox"
+  "context": 8192, "max_context": 262144,
+  "parallel": 1, "gpu_layers": 999, "cpu_moe": 27,
+  "temperature": 0.3, "top_k": 20, "top_p": 0.95,
+  "presence_penalty": 0.0, "repeat_penalty": 1.0, "frequency_penalty": 0.0,
+  "batch_size": 512, "ubatch_size": 253,
+  "kv_k": "q8_0", "kv_v": "q8_0", "flash_attention": "on",
+  "mtp_supported": false, "mtp_model_path": "",
+  "spec_type": "none", "spec_draft_n_max": 2,
+  "tools": "all", "tools_runtime": "docker:ai-cpp-sandbox"
 }
 ```
 
-The default `Qwen3-Coder-30B-A3B` profile uses a 32768-token context. Existing configs that still have the earlier stock values 8192 or 16384 for that profile are migrated to 32768; other user-selected context values are preserved.
+8192 is the recommended starting context. The Qwen3.6 catalog profile permits
+8192 through 262144 tokens using discrete slider steps; 262144 is the model's
+documented context-window ceiling, while actual usable context depends on
+available RAM/VRAM and llama.cpp runtime support. Unknown files added manually
+remain conservative.
+Existing Qwen3.6 registrations receive this capability update without changing
+their current context or other per-model settings.
+CPU MoE 27 is an initial setting, not a hardware-independent optimum.
 
-## Model Settings page
+Flash Attention accepts `on`, `auto`, `off`; legacy booleans migrate to on/off.
+MTP requires BOTH explicit `mtp_supported=true` and an existing separate
+`mtp_model_path`. No filename substring enables it. Controls and launch flags
+stay disabled without both conditions; old stored settings are preserved.
+When enabled explicitly, the command includes `--model-draft <path>`,
+`--spec-type` and `--spec-draft-n-max`. MTP downloading is not part of this version.
 
-The main window has a **Model Settings** button. It opens a native Win32 page for all currently discussed tuning parameters: context, temperature, top-k, top-p, presence/repeat/frequency penalties, batch size, ubatch size, parallel slots, GPU layers, CPU MoE layers, K/V cache types, Flash Attention, and speculative-decoding settings. Each field includes a short description of what it controls. Settings are saved per model profile and apply on the next Start/Restart.
-
-The current coding defaults are:
-
-- `context = 32768`
-- `temperature = 0.3`
-- `top_k = 20`
-- `top_p = 0.95`
-- `presence_penalty = 0.0`
-- `repeat_penalty = 1.0`
-- `frequency_penalty = 0.0`
-- `batch_size = 512`
-- `ubatch_size = 253`
-- `flash_attention = on`
-
-The repetition-related penalties are intentionally neutral for coding because source code naturally repeats identifiers, keywords, paths, JSON keys, and command fragments.
-
-### Flash Attention
-
-Flash Attention is stored per model profile as `on`, `auto`, or `off` and is passed directly to llama.cpp as:
+For a user-selected example folder, the Qwen3.6 command is:
 
 ```text
---flash-attn on|auto|off
+llama serve -m "G:\AI\models\Qwen3.6-35B-A3B\Qwen3.6-35B-A3B-Q4_K_M.gguf" -c 8192 -np 1 -ngl 999 -ncmoe 27 --temp 0.300000 --top-k 20 --top-p 0.950000 --presence-penalty 0.000000 --repeat-penalty 1.000000 --frequency-penalty 0.000000 --batch-size 512 --ubatch-size 253 -ctk "q8_0" -ctv "q8_0" --flash-attn "on" --tools "all" --tools-runtime "docker:ai-cpp-sandbox" --host "127.0.0.1" --port 8080
 ```
 
-The Model Settings page uses a drop-down instead of a boolean checkbox. The current Qwen3-Coder profile defaults to `on`; `auto` allows llama.cpp to decide based on the active model/backend, and `off` remains available for compatibility troubleshooting. Legacy configs that stored `flash_attention` as JSON `true` or `false` are read as `on` or `off` respectively.
-
-### MTP speculative decoding
-
-Profiles have an explicit `mtp_supported` capability flag. For a normal model such as the current `Qwen3-Coder-30B-A3B` profile it is `false`; the Model Settings page shows `--spec-type` and `--spec-draft-n-max` disabled/greyed out and the launcher does not pass MTP flags to `llama serve`.
-
-For a known MTP-capable GGUF such as a future `Qwen3.6-35B-A3B MTP` profile, set:
-
-```json
-"mtp_supported": true,
-"spec_type": "draft-mtp",
-"spec_draft_n_max": 2
-```
-
-The controls then become editable and the launcher passes:
-
-```text
---spec-type draft-mtp --spec-draft-n-max 2
-```
-
-This prevents accidentally requesting MTP from a GGUF that does not contain compatible MTP heads.
+The path above is an example, not an installation default. A configured
+`llama-server.exe` is invoked directly without the `serve` subcommand.
 
 ## Memory monitor
 
@@ -116,14 +164,23 @@ docker build -t ai-cpp-sandbox docker
 ```
 
 Docker is used only as the tools sandbox. Inference and CUDA remain native Windows processes.
+The launcher creates one owned, temporary Docker container for the running server.
+It mounts only the configured host workspace as `/workspace`, sets `/workspace` as
+the working directory, and passes llama.cpp `docker-container:<owned-id>` as the
+tools runtime. The container uses a read-only root filesystem, tmpfs for `/tmp`
+and `/root/.cache`, drops all capabilities, and enables `no-new-privileges`.
+It does not use the Docker socket, privileged mode, or broad host-directory mounts.
+Persistent project files and deliverables must stay under `/workspace`; `/tmp` is
+for disposable intermediate data. Rebuild Sandbox rebuilds only the image and
+never deletes or modifies the host workspace.
 
 ## Using the launcher
 
 1. Start `AI-Agent-LVK.exe`.
 2. Select a profile.
 3. Optionally open **Model Settings** and tune the selected profile.
-4. Make sure the status panel reports `llama`, Docker, the image, model, workspace, and port correctly.
-5. Press **Start AI**.
+4. Press **Start Docker** if Docker Desktop is not running, then use **Rebuild Sandbox** if the `ai-cpp-sandbox` image is missing.
+5. Press **Start AI**. The launcher prepares the owned sandbox with the same persisted workspace before starting llama.cpp.
 6. Press **Open Web UI** to open `http://127.0.0.1:8080`.
 7. Use **Stop** or **Restart** to control only the process launched by this window.
 

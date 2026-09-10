@@ -1,4 +1,5 @@
 #include "ui/ModelSettingsWindow.h"
+#include "util/Text.h"
 #include <commctrl.h>
 #include <algorithm>
 #include <array>
@@ -12,8 +13,8 @@ namespace {
 constexpr wchar_t kClassName[] = L"AI-Agent-LVK-ModelSettings";
 constexpr int kSave = 9001, kCancel = 9002;
 
-constexpr std::array<int, 9> kContextSizes = {
-    8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152
+constexpr std::array<int, 13> kContextSizes = {
+    512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152
 };
 
 struct SamplingPreset {
@@ -45,15 +46,11 @@ struct State {
     HWND contextDescription{};
     bool applyingPreset = false;
     bool saved = false;
+    bool contextChanged = false;
 };
 
-std::wstring wide(const std::string& s) { return {s.begin(), s.end()}; }
-std::string narrow(const std::wstring& s) {
-    std::string result;
-    result.reserve(s.size());
-    for (const wchar_t ch : s) result.push_back(static_cast<char>(ch));
-    return result;
-}
+std::wstring wide(const std::string& s) { return util::wide(s); }
+std::string narrow(const std::wstring& s) { return util::utf8(s); }
 
 std::wstring text(HWND control) {
     const int length = GetWindowTextLengthW(control);
@@ -215,7 +212,7 @@ bool saveValues(HWND window, State& s) {
     bool ok = true;
     const int contextPos = static_cast<int>(SendMessageW(s.controls[Context], TBM_GETPOS, 0, 0));
     if (contextPos < 0 || contextPos > contextMaxIndex(updated)) ok = false;
-    else updated.context = kContextSizes[static_cast<size_t>(contextPos)];
+    else if(s.contextChanged) updated.context = kContextSizes[static_cast<size_t>(contextPos)];
 
     ok &= parseDouble(s.controls[Temperature], 0.0, 2.0, updated.temperature);
     ok &= parseInt(s.controls[TopK], 0, 100000, updated.topK);
@@ -232,11 +229,9 @@ bool saveValues(HWND window, State& s) {
     updated.kvV = comboValue(s.controls[KvV]);
     updated.flashAttention = comboValue(s.controls[FlashAttention]);
 
-    if (updated.mtpSupported) {
+    if (updated.mtpSupported && updated.mtpFileAvailable) {
         updated.specType = comboValue(s.controls[SpecType]);
         ok &= parseInt(s.controls[SpecDraftNMax], 1, 256, updated.specDraftNMax);
-    } else {
-        updated.specType = "none";
     }
 
     if (!ok || updated.kvK.empty() || updated.kvV.empty() || updated.flashAttention.empty()) {
@@ -321,15 +316,16 @@ LRESULT CALLBACK proc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
         const wchar_t* specTypes[] = {L"none",L"draft-mtp"};
         addStatic(window,20,y+4,170,20,L"Speculative type");
         s->controls[SpecType]=addCombo(window,195,y,120,specTypes,std::size(specTypes),wide(p.specType));
-        addStatic(window,330,y+2,420,34,L"--spec-type. draft-mtp uses MTP heads embedded in the GGUF."); y+=36;
+        addStatic(window,330,y+2,420,34,L"--spec-type. Requires explicit capability and a separate MTP draft file."); y+=36;
         addRow(window,*s,SpecDraftNMax,y,L"Spec draft N max",std::to_wstring(p.specDraftNMax),L"--spec-draft-n-max. Maximum draft tokens per speculative step."); y+=36;
 
-        const wchar_t* capability = p.mtpSupported
-            ? L"MTP: supported by this profile - speculative controls are enabled."
-            : L"MTP: not supported by this profile - speculative controls are intentionally disabled.";
+        const bool mtpReady=p.mtpSupported&&p.mtpFileAvailable;
+        const wchar_t* capability = mtpReady
+            ? L"MTP: explicit capability and separate draft file available."
+            : L"MTP disabled: requires mtp_supported=true and an existing mtp_model_path.";
         addStatic(window,20,y+2,730,28,capability);
-        EnableWindow(s->controls[SpecType],p.mtpSupported?TRUE:FALSE);
-        EnableWindow(s->controls[SpecDraftNMax],p.mtpSupported?TRUE:FALSE);
+        EnableWindow(s->controls[SpecType],mtpReady?TRUE:FALSE);
+        EnableWindow(s->controls[SpecDraftNMax],mtpReady?TRUE:FALSE);
         y+=34;
 
         CreateWindowW(L"BUTTON",L"Save",WS_CHILD|WS_VISIBLE|BS_DEFPUSHBUTTON,560,y,85,28,window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSave)),nullptr,nullptr);
@@ -338,6 +334,7 @@ LRESULT CALLBACK proc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
     }
     case WM_HSCROLL:
         if (reinterpret_cast<HWND>(lParam) == s->controls[Context]) {
+            s->contextChanged=true;
             updateContextDescription(*s);
             return 0;
         }

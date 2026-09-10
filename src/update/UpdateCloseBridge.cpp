@@ -14,9 +14,14 @@ LRESULT CALLBACK bridgeWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM
     case WM_CLOSE:
         // LVK-Updater sends WM_CLOSE only after the user has confirmed the
         // update and the downloaded package has passed verification.
-        std::fflush(nullptr);
-        ExitProcess(0);
-        __assume(0);
+        // Use the main shutdown path: cancel/join downloads, persist registration,
+        // and stop only our owned llama process before the updater replaces files.
+        EnumWindows([](HWND window,LPARAM)->BOOL{
+            DWORD pid{};GetWindowThreadProcessId(window,&pid);wchar_t name[128]{};GetClassNameW(window,name,128);
+            if(pid==GetCurrentProcessId()&&wcscmp(name,L"AI-Agent-LVK-Window")==0){PostMessageW(window,WM_CLOSE,0,0);return FALSE;}
+            return TRUE;
+        },0);
+        return 0;
 
     case kStopMessage:
         DestroyWindow(hwnd);

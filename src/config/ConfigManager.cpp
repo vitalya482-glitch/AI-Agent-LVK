@@ -1,60 +1,152 @@
 #include "config/ConfigManager.h"
+#include "config/Json.h"
+#include "util/Text.h"
 #include <fstream>
-#include <regex>
-#include <sstream>
-#include <string_view>
-#include <utility>
+#include <set>
+#include <windows.h>
 
 namespace lvk::config {
 namespace {
-std::string read(const std::string& s, const char* key, const std::string& d) { std::regex r("\\\""+std::string(key)+"\\\"\\s*:\\s*\\\"([^\\\"]*)\\\""); std::smatch m; return std::regex_search(s,m,r)?m[1].str():d; }
-int number(const std::string& s, const char* key, int d) { std::regex r("\\\""+std::string(key)+"\\\"\\s*:\\s*(-?[0-9]+)"); std::smatch m; return std::regex_search(s,m,r)?std::stoi(m[1].str()):d; }
-double decimal(const std::string& s, const char* key, double d) { std::regex r("\\\""+std::string(key)+"\\\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?)"); std::smatch m; return std::regex_search(s,m,r)?std::stod(m[1].str()):d; }
-bool flag(const std::string& s, const char* key, bool d) { std::regex r("\\\""+std::string(key)+"\\\"\\s*:\\s*(true|false)"); std::smatch m; return std::regex_search(s,m,r)?m[1].str()=="true":d; }
-std::string flashAttentionMode(const std::string& s, const char* key, const std::string& d) {
-    const auto mode = read(s, key, {});
-    if (mode == "on" || mode == "off" || mode == "auto") return mode;
-    std::regex legacy("\\\""+std::string(key)+"\\\"\\s*:\\s*(true|false)");
-    std::smatch match;
-    if (std::regex_search(s, match, legacy)) return match[1].str() == "true" ? "on" : "off";
-    return d;
+Profile decode(const Json& j, bool legacy) {
+    Profile p;
+    p.name=j.at(legacy?"name":"display_name").str();
+    p.model=util::wide(j.at(legacy?"model":"path").str());
+    p.id=j.at("id").str();p.family=j.at("family").str();p.quant=j.at("quant").str();
+    p.mtpModelPath=util::wide(j.at("mtp_model_path").str());
+#define INT(key,member) p.member=j.at(key).integer(p.member)
+#define NUM(key,member) p.member=j.at(key).num(p.member)
+#define STR(key,member) p.member=j.at(key).str(p.member)
+    INT("context",context);INT("max_context",maxContext);INT("parallel",parallel);INT("gpu_layers",gpuLayers);INT("cpu_moe",cpuMoe);
+    INT("top_k",topK);INT("batch_size",batchSize);INT("ubatch_size",ubatchSize);INT("spec_draft_n_max",specDraftNMax);
+    NUM("temperature",temperature);NUM("top_p",topP);NUM("presence_penalty",presencePenalty);NUM("repeat_penalty",repeatPenalty);NUM("frequency_penalty",frequencyPenalty);
+    STR("kv_k",kvK);STR("kv_v",kvV);STR("tools",tools);STR("tools_runtime",toolsRuntime);STR("spec_type",specType);
+#undef INT
+#undef NUM
+#undef STR
+    p.mtpSupported=j.at("mtp_supported").flag();
+    p.flashAttention=j.at("flash_attention").str();
+    if(p.flashAttention.empty())p.flashAttention=j.at("flash_attention").flag(true)?"on":"off";
+    if(p.name.empty()||p.model.empty())throw std::runtime_error("A registered model has no name or path.");
+    if(p.model.wstring().find(L'\0')!=std::wstring::npos)throw std::runtime_error("Invalid model path.");
+    p.model=std::filesystem::absolute(p.model).lexically_normal();
+    if(p.context<=0||p.maxContext<=0)throw std::runtime_error("Invalid model context.");
+    return p;
 }
-std::string json(const std::string& s) { std::string r; for(char c:s) { if(c=='\\'||c=='\"') r+='\\'; if(c=='\n') r+="\\n"; else r+=c; } return r; }
+Json encode(const Profile& p) {
+    return Json::Object{
+        {"id",p.id},{"display_name",p.name},{"path",util::pathText(p.model)},{"family",p.family},{"quant",p.quant},
+        {"mtp_model_path",util::pathText(p.mtpModelPath)},{"context",p.context},{"max_context",p.maxContext},
+        {"parallel",p.parallel},{"gpu_layers",p.gpuLayers},{"cpu_moe",p.cpuMoe},
+        {"temperature",p.temperature},{"top_k",p.topK},{"top_p",p.topP},{"presence_penalty",p.presencePenalty},
+        {"repeat_penalty",p.repeatPenalty},{"frequency_penalty",p.frequencyPenalty},{"batch_size",p.batchSize},
+        {"ubatch_size",p.ubatchSize},{"kv_k",p.kvK},{"kv_v",p.kvV},{"flash_attention",p.flashAttention},
+        {"tools",p.tools},{"tools_runtime",p.toolsRuntime},{"mtp_supported",p.mtpSupported},
+        {"spec_type",p.specType},{"spec_draft_n_max",p.specDraftNMax}
+    };
+}
+std::filesystem::path defaultWorkspace(const std::filesystem::path& configPath) {
+    auto candidate=configPath.parent_path()/L"workspace";
+    std::error_code ec;
+    std::filesystem::create_directories(candidate,ec);
+    if(!ec)return candidate;
+    wchar_t localAppData[32768]{};
+    constexpr DWORD capacity=static_cast<DWORD>(_countof(localAppData));
+    const DWORD length=GetEnvironmentVariableW(L"LOCALAPPDATA",localAppData,capacity);
+    if(length>0&&length<capacity){
+        candidate=std::filesystem::path(localAppData)/L"AI-Agent-LVK"/L"workspace";
+        ec.clear();std::filesystem::create_directories(candidate,ec);
+        if(!ec)return candidate;
+    }
+    return configPath.parent_path()/L"workspace";
+}
 }
 ConfigManager::ConfigManager(std::filesystem::path directory):path_(std::move(directory)/L"config.json") {}
-bool migrateDefaultQwenContext(std::string& text, std::string& error, const std::filesystem::path& path) {
-    constexpr std::string_view profileName = "Qwen3-Coder-30B-A3B";
-    const auto name = text.find(profileName);
-    if (name == std::string::npos) return false;
-    const auto begin = text.rfind('{', name);
-    const auto end = text.find('}', name);
-    if (begin == std::string::npos || end == std::string::npos || end <= begin) return false;
-    const auto key = text.find("\"context\"", begin);
-    if (key == std::string::npos || key >= end) return false;
-    const auto colon = text.find(':', key);
-    if (colon == std::string::npos || colon >= end) return false;
-    const auto value = text.find_first_of("0123456789", colon + 1);
-    if (value == std::string::npos || value >= end) return false;
-    const bool old8192 = text.compare(value, 4, "8192") == 0 && (value + 4 >= end || text[value + 4] < '0' || text[value + 4] > '9');
-    const bool old16384 = text.compare(value, 5, "16384") == 0 && (value + 5 >= end || text[value + 5] < '0' || text[value + 5] > '9');
-    if (!old8192 && !old16384) return false;
-    text.replace(value, old8192 ? 4 : 5, "32768");
-    std::ofstream out(path, std::ios::trunc);
-    if (!out) { error = "Cannot migrate context in " + path.string(); return false; }
-    out << text;
-    if (!out) { error = "Cannot write migrated context to " + path.string(); return false; }
-    return true;
-}
 bool ConfigManager::load(std::string& error) {
-    if(!std::filesystem::exists(path_)) { settings_.profiles.push_back({"Qwen3-Coder-30B-A3B", LR"(G:\AI\models\Qwen3-Coder-30B-A3B\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf)"}); settings_.selectedProfile=settings_.profiles.front().name; return save(error); }
-    std::ifstream in(path_); std::stringstream b; b<<in.rdbuf(); std::string s=b.str(); in.close(); if(s.empty()){error="config.json is empty.";return false;}
-    settings_.llamaCommand=read(s,"llama_command",settings_.llamaCommand); settings_.host=read(s,"server_host",settings_.host); settings_.port=(unsigned short)number(s,"server_port",settings_.port); settings_.workspace=read(s,"workspace",settings_.workspace.string()); settings_.dockerImage=read(s,"docker_image",settings_.dockerImage); settings_.autoStartServer=flag(s,"auto_start_server",false); settings_.selectedProfile=read(s,"selected_profile",{});
-    const auto p=s.find("\"profiles\""); const auto a=s.find('[',p); const auto z=s.find(']',a); if(a!=std::string::npos&&z!=std::string::npos){ std::string block=s.substr(a,z-a); std::regex obj("\\{([^}]*)\\}"); for(std::sregex_iterator i(block.begin(),block.end(),obj),e;i!=e;++i){const auto x=i->str(); Profile q; q.name=read(x,"name",{}); q.model=read(x,"model",{}); if(!q.name.empty()&&!q.model.empty()){q.context=number(x,"context",q.context);q.maxContext=number(x,"max_context",q.maxContext);q.parallel=number(x,"parallel",q.parallel);q.gpuLayers=number(x,"gpu_layers",q.gpuLayers);q.cpuMoe=number(x,"cpu_moe",q.cpuMoe);q.topK=number(x,"top_k",q.topK);q.batchSize=number(x,"batch_size",q.batchSize);q.ubatchSize=number(x,"ubatch_size",q.ubatchSize);q.temperature=decimal(x,"temperature",q.temperature);q.topP=decimal(x,"top_p",q.topP);q.presencePenalty=decimal(x,"presence_penalty",q.presencePenalty);q.repeatPenalty=decimal(x,"repeat_penalty",q.repeatPenalty);q.frequencyPenalty=decimal(x,"frequency_penalty",q.frequencyPenalty);q.kvK=read(x,"kv_k",q.kvK);q.kvV=read(x,"kv_v",q.kvV);q.flashAttention=flashAttentionMode(x,"flash_attention",q.flashAttention);q.tools=read(x,"tools",q.tools);q.toolsRuntime=read(x,"tools_runtime",q.toolsRuntime);q.mtpSupported=flag(x,"mtp_supported",q.mtpSupported);q.specType=read(x,"spec_type",q.specType);q.specDraftNMax=number(x,"spec_draft_n_max",q.specDraftNMax);settings_.profiles.push_back(std::move(q));}} }
-    if (migrateDefaultQwenContext(s, error, path_)) {
-        for (auto& profile : settings_.profiles) if (profile.name == "Qwen3-Coder-30B-A3B" && (profile.context == 8192 || profile.context == 16384)) profile.context = 32768;
-    } else if (!error.empty()) return false;
-    if(settings_.profiles.empty()){error="config.json contains no valid profiles.";return false;} if(settings_.selectedProfile.empty())settings_.selectedProfile=settings_.profiles.front().name; return true;
+    error.clear();
+    try {
+        Settings next;
+        next.workspace=defaultWorkspace(path_);
+        if(!std::filesystem::exists(path_)){
+            // Discover the pre-existing installation only on first run. Never invent a downloaded model.
+            Profile old;old.name="Qwen3-Coder-30B-A3B";old.id="legacy-1";
+            old.model=LR"(G:\AI\models\Qwen3-Coder-30B-A3B\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf)";
+            if(std::filesystem::is_regular_file(old.model)){next.profiles.push_back(old);next.selectedProfile=old.id;}
+            std::error_code workspaceError;std::filesystem::create_directories(next.workspace,workspaceError);
+            if(workspaceError)throw std::runtime_error("Cannot create workspace: "+util::pathText(next.workspace)+" ("+workspaceError.message()+")");
+            settings_=std::move(next);return save(error);
+        }
+        std::ifstream in(path_,std::ios::binary);
+        if(!in)throw std::runtime_error("Cannot read config.json.");
+        if(std::filesystem::file_size(path_)>16*1024*1024)throw std::runtime_error("config.json is too large.");
+        std::string text((std::istreambuf_iterator<char>(in)),{});
+        in.close(); // Windows cannot replace a config still open by this reader.
+        const Json root=Json::parse(text);
+        if(!std::holds_alternative<Json::Object>(root.value))throw std::runtime_error("Configuration must be a JSON object.");
+        next.llamaCommand=root.at("llama_command").str(next.llamaCommand);
+        next.host=root.at("server_host").str(next.host);
+        const int port=root.at("server_port").integer(next.port);
+        if(port<1||port>65535)throw std::runtime_error("Invalid server port.");
+        next.port=static_cast<unsigned short>(port);
+        auto workspaceText=root.at("workspace_path").str(root.at("workspace").str(util::pathText(next.workspace)));
+        if(workspaceText.empty())next.workspace=defaultWorkspace(path_);else next.workspace=util::wide(workspaceText);
+        next.dockerImage=root.at("docker_image").str(next.dockerImage);
+        next.autoStartServer=root.at("auto_start_server").flag();
+        next.lastModelDownloadDirectory=util::wide(root.at("last_model_download_directory").str());
+        const bool legacy=!root.has("installed_models");
+        next.selectedProfile=root.at(legacy?"selected_profile":"active_model_id").str();
+        const auto& models=root.at(legacy?"profiles":"installed_models");
+        if(!legacy&&!std::holds_alternative<Json::Array>(models.value))throw std::runtime_error("installed_models must be an array.");
+        std::set<std::string> ids;
+        bool capabilityUpdated=false;
+        for(const auto& item:models.array()){
+            auto p=decode(item,legacy);
+            if(p.family=="qwen35moe"&&p.quant=="Q4_K_M"&&p.maxContext<262144){p.maxContext=262144;capabilityUpdated=true;}
+            if(p.id.empty())p.id="legacy-"+std::to_string(next.profiles.size()+1);
+            if(!ids.insert(p.id).second)throw std::runtime_error("Duplicate model id in config.");
+            if(legacy&&p.name==next.selectedProfile)next.selectedProfile=p.id;
+            next.profiles.push_back(std::move(p));
+        }
+        if(legacy&&next.profiles.empty()&&root.has("model_path")){
+            Json::Object old=std::get<Json::Object>(root.value);
+            old["name"]=root.at("model_name").str("Existing model");
+            old["model"]=root.at("model_path");
+            auto p=decode(Json(old),true);p.id="legacy-1";next.selectedProfile=p.id;next.profiles.push_back(p);
+        }
+        if(legacy&&next.profiles.empty())throw std::runtime_error("Legacy config has no valid model profile.");
+        if(!next.profiles.empty()&&!ids.contains(next.selectedProfile))next.selectedProfile=next.profiles.front().id;
+        settings_=std::move(next);
+        std::error_code workspaceError;
+        std::filesystem::create_directories(settings_.workspace,workspaceError);
+        if(workspaceError)throw std::runtime_error("Cannot create workspace: "+util::pathText(settings_.workspace)+" ("+workspaceError.message()+")");
+        if(legacy){
+            // Keep the exact old bytes for recovery; do not replace a previous migration backup.
+            auto backup=path_;backup+=L".pre-models.bak";
+            if(!std::filesystem::exists(backup))std::filesystem::copy_file(path_,backup);
+            return save(error);
+        }
+        if(capabilityUpdated)return save(error);
+        return true;
+    }catch(const std::exception& e){error=e.what();return false;}
 }
-bool ConfigManager::save(std::string& error) const { std::ofstream out(path_); if(!out){error="Cannot write "+path_.string();return false;} out<<"{\n  \"llama_command\": \""<<json(settings_.llamaCommand)<<"\",\n  \"server_host\": \""<<json(settings_.host)<<"\",\n  \"server_port\": "<<settings_.port<<",\n  \"workspace\": \""<<json(settings_.workspace.string())<<"\",\n  \"docker_image\": \""<<json(settings_.dockerImage)<<"\",\n  \"auto_start_server\": "<<(settings_.autoStartServer?"true":"false")<<",\n  \"selected_profile\": \""<<json(settings_.selectedProfile)<<"\",\n  \"profiles\": [\n"; for(size_t i=0;i<settings_.profiles.size();++i){const auto&p=settings_.profiles[i];out<<"    {\"name\": \""<<json(p.name)<<"\", \"model\": \""<<json(p.model.string())<<"\", \"context\": "<<p.context<<", \"max_context\": "<<p.maxContext<<", \"parallel\": "<<p.parallel<<", \"gpu_layers\": "<<p.gpuLayers<<", \"cpu_moe\": "<<p.cpuMoe<<", \"temperature\": "<<p.temperature<<", \"top_k\": "<<p.topK<<", \"top_p\": "<<p.topP<<", \"presence_penalty\": "<<p.presencePenalty<<", \"repeat_penalty\": "<<p.repeatPenalty<<", \"frequency_penalty\": "<<p.frequencyPenalty<<", \"batch_size\": "<<p.batchSize<<", \"ubatch_size\": "<<p.ubatchSize<<", \"kv_k\": \""<<p.kvK<<"\", \"kv_v\": \""<<p.kvV<<"\", \"flash_attention\": \""<<json(p.flashAttention)<<"\", \"tools\": \""<<p.tools<<"\", \"tools_runtime\": \""<<p.toolsRuntime<<"\", \"mtp_supported\": "<<(p.mtpSupported?"true":"false")<<", \"spec_type\": \""<<json(p.specType)<<"\", \"spec_draft_n_max\": "<<p.specDraftNMax<<"}"<<(i+1<settings_.profiles.size()?",":"")<<"\n";} out<<"  ]\n}\n"; return true; }
-const Profile* ConfigManager::selectedProfile() const noexcept { for(const auto&p:settings_.profiles)if(p.name==settings_.selectedProfile)return &p; return settings_.profiles.empty()?nullptr:&settings_.profiles.front(); }
+bool ConfigManager::save(std::string& error) const {
+    error.clear();
+    try {
+        Json::Array models;for(const auto& p:settings_.profiles)models.push_back(encode(p));
+        const auto workspace=settings_.workspace.empty()?path_.parent_path()/L"workspace":settings_.workspace;
+        Json root=Json::Object{{"schema_version",2},{"llama_command",settings_.llamaCommand},{"server_host",settings_.host},
+            {"server_port",static_cast<int>(settings_.port)},{"workspace_path",util::pathText(workspace)},{"docker_image",settings_.dockerImage},
+            {"auto_start_server",settings_.autoStartServer},{"active_model_id",settings_.selectedProfile},
+            {"last_model_download_directory",util::pathText(settings_.lastModelDownloadDirectory)},{"installed_models",models}};
+        const auto data=root.dump()+"\n";
+        auto temp=path_;temp+=L".tmp";
+        {std::ofstream out(temp,std::ios::binary|std::ios::trunc);out<<data;out.flush();if(!out)throw std::runtime_error("Cannot write config.json temporary file.");}
+        if(!MoveFileExW(temp.c_str(),path_.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))
+            throw std::runtime_error("Cannot replace config.json: "+util::winError(GetLastError()));
+        return true;
+    }catch(const std::exception& e){error=e.what();return false;}
+}
+const Profile* ConfigManager::selectedProfile() const noexcept {
+    for(const auto& p:settings_.profiles)if(p.id==settings_.selectedProfile)return &p;
+    return nullptr;
+}
 }
