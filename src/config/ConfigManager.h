@@ -7,13 +7,18 @@ namespace lvk::config {
 struct Profile {
     std::string name;
     std::filesystem::path model;
-    int context = 32768, parallel = 1, gpuLayers = 999, cpuMoe = 27;
+    int context = 32768, maxContext = 262144, parallel = 1, gpuLayers = 999, cpuMoe = 27;
     int topK = 20, batchSize = 512, ubatchSize = 253;
     double temperature = 0.3, topP = 0.95;
     double presencePenalty = 0.0, repeatPenalty = 1.0, frequencyPenalty = 0.0;
     std::string kvK = "q8_0", kvV = "q8_0";
     std::string flashAttention = "on";
     std::string tools = "all", toolsRuntime = "docker:ai-cpp-sandbox";
+
+    // Highest context size this profile is intended to expose in the GUI.
+    // The Model Settings slider uses discrete power-of-two-ish positions and
+    // hides values above this profile-specific capability limit.
+    int maxContextCapability() const noexcept { return maxContext; }
 
     // Speculative decoding. MTP controls are enabled in the GUI only for
     // profiles whose GGUF is known to contain compatible MTP heads.
