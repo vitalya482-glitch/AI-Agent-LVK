@@ -7,7 +7,8 @@ namespace lvk::config {
 struct Profile {
     std::string name;
     std::filesystem::path model;
-    int context = 16384, parallel = 1, gpuLayers = 999, cpuMoe = 27;
+    int context = 32768, parallel = 1, gpuLayers = 999, cpuMoe = 27;
+    double temperature = 0.3;
     std::string kvK = "q8_0", kvV = "q8_0", tools = "all", toolsRuntime = "docker:ai-cpp-sandbox";
     bool flashAttention = true;
 };
