@@ -43,6 +43,9 @@ On first start the launcher creates `config.json` beside the executable. Edit it
       "gpu_layers": 999,
       "cpu_moe": 27,
       "temperature": 0.3,
+      "presence_penalty": 0.0,
+      "repeat_penalty": 1.0,
+      "frequency_penalty": 0.0,
       "kv_k": "q8_0",
       "kv_v": "q8_0",
       "flash_attention": true,
@@ -57,7 +60,15 @@ On first start the launcher creates `config.json` beside the executable. Edit it
 
 The default `Qwen3-Coder-30B-A3B` profile now uses a 32768-token context. Existing configs that still have the earlier stock values 8192 or 16384 for that profile are migrated to 32768; other user-selected context values are preserved.
 
-`temperature` is passed to `llama serve` as `--temp`. It controls sampling randomness: lower values make generation more deterministic and repeatable, while higher values allow more varied token choices. The current coder profile uses `0.3` as a conservative coding/agent default. Temperature changes sampling behavior, not the model weights or context size. Current llama.cpp documentation reports a server default of 0.8 when temperature is not explicitly supplied, so the launcher stores it explicitly per profile for predictable behavior.
+`temperature` is passed to `llama serve` as `--temp`. It controls sampling randomness: lower values make generation more deterministic and repeatable, while higher values allow more varied token choices. The current coder profile uses `0.3` as a conservative coding/agent default. Temperature changes sampling behavior, not the model weights or context size.
+
+The coder profile also stores the main repetition-related penalties explicitly:
+
+- `presence_penalty = 0.0` — disabled; does not penalize a token merely because it has appeared before;
+- `repeat_penalty = 1.0` — disabled; does not apply llama.cpp's general repetition penalty;
+- `frequency_penalty = 0.0` — disabled; does not increasingly penalize tokens according to how often they already appeared.
+
+These values are intentionally neutral for coding because source code naturally repeats identifiers, keywords, types, paths, JSON keys, and command fragments. They are passed to llama.cpp as `--presence-penalty`, `--repeat-penalty`, and `--frequency-penalty`, and remain independently configurable per model profile.
 
 The GUI also shows system RAM/VRAM and the RAM/VRAM reported for the llama serve process. NVIDIA VRAM is read through the optional driver-provided NVML library; if NVML is unavailable, the launcher shows `VRAM: unavailable` without starting `nvidia-smi` or another helper process.
 
