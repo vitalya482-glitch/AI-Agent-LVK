@@ -14,15 +14,19 @@ The default endpoint is `127.0.0.1:8080`. `G:\AI\workspace` is the default works
 
 ## Configuration and profiles
 
-`ConfigManager` owns the small JSON-shaped `config.json` beside the executable. Profiles contain model path and llama serve tuning such as context, parallelism, GPU layers, MoE CPU layers, temperature, sampling penalties, KV types, flash attention, and tools runtime. The last selected profile is persisted.
+`ConfigManager` owns the small JSON-shaped `config.json` beside the executable. Profiles contain model path and llama serve tuning such as context, parallelism, GPU layers, MoE CPU layers, sampling settings, penalties, prompt batching, KV types, flash attention, and tools runtime. The last selected profile is persisted.
 
 The default `Qwen3-Coder-30B-A3B` profile currently uses:
 
 - context: 32768 tokens;
 - temperature: 0.3;
+- top-k: 20;
+- top-p: 0.95;
 - presence penalty: 0.0;
 - repeat penalty: 1.0;
 - frequency penalty: 0.0;
+- batch size: 512;
+- micro-batch size: 253;
 - parallel slots: 1;
 - GPU layers: 999;
 - CPU MoE layers: 27;
@@ -31,9 +35,11 @@ The default `Qwen3-Coder-30B-A3B` profile currently uses:
 - tools: all;
 - tools runtime: docker:ai-cpp-sandbox.
 
-`temperature` is a per-profile sampling parameter passed to llama.cpp as `--temp`. Lower values make token selection more deterministic and repeatable; higher values increase variation. For coding/agent use the current baseline is 0.3. Keep this parameter configurable because future model profiles may need different sampling settings.
+Sampling settings are per-profile and passed directly to llama.cpp. `temperature` uses `--temp`, `top_k` uses `--top-k`, and `top_p` uses `--top-p`. Keep them independently configurable because future model profiles may need different recommended values.
 
 The current coding profile keeps the three conventional repetition penalties neutral: `presence_penalty = 0.0`, `repeat_penalty = 1.0`, and `frequency_penalty = 0.0`. These are passed to llama.cpp as `--presence-penalty`, `--repeat-penalty`, and `--frequency-penalty`. Neutral values are intentional because program code naturally repeats identifiers, syntax, types, JSON keys, file paths, and command fragments. Keep all three independently configurable per model profile for future model-specific tuning.
+
+Prompt processing uses `batch_size = 512` and `ubatch_size = 253`, passed to llama.cpp as `--batch-size` and `--ubatch-size`. Batch size is the logical prompt-processing batch limit; micro-batch size is the physical chunk size used during evaluation. Both are performance/memory tuning parameters and belong in the model profile rather than being hardcoded.
 
 Existing Qwen3-Coder configs are migrated from the earlier stock context values 8192 or 16384 to 32768 only when they still match those old defaults; other explicitly chosen context values are preserved.
 
