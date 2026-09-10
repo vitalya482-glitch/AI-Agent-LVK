@@ -24,7 +24,7 @@ std::wstring LlamaManager::commandLine(const config::Settings& s, const config::
         + L" --ubatch-size " + std::to_wstring(p.ubatchSize)
         + L" -ctk " + w(p.kvK)
         + L" -ctv " + w(p.kvV)
-        + L" -fa " + (p.flashAttention ? L"on" : L"off");
+        + L" --flash-attn " + w(p.flashAttention);
 
     // Never request MTP from a profile that is not explicitly marked as MTP-capable.
     if (p.mtpSupported && p.specType != "none") {
