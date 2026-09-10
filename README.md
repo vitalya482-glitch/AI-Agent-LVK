@@ -38,10 +38,11 @@ On first start the launcher creates `config.json` beside the executable. Edit it
     {
       "name": "Qwen3-Coder-30B-A3B",
       "model": "G:\\AI\\models\\Qwen3-Coder-30B-A3B\\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
-      "context": 16384,
+      "context": 32768,
       "parallel": 1,
       "gpu_layers": 999,
       "cpu_moe": 27,
+      "temperature": 0.3,
       "kv_k": "q8_0",
       "kv_v": "q8_0",
       "flash_attention": true,
@@ -54,7 +55,9 @@ On first start the launcher creates `config.json` beside the executable. Edit it
 
 `llama_command` may also be a full path such as `G:\\AI\\llama.cpp\\llama.exe`. The default bind address is deliberately loopback-only.
 
-The default `Qwen3-Coder-30B-A3B` profile uses a 16384-token context. When an existing `config.json` still has the original default value of 8192 for that profile, the launcher migrates only that context field and preserves the rest of the file. Other user-selected context values are left unchanged.
+The default `Qwen3-Coder-30B-A3B` profile now uses a 32768-token context. Existing configs that still have the earlier stock values 8192 or 16384 for that profile are migrated to 32768; other user-selected context values are preserved.
+
+`temperature` is passed to `llama serve` as `--temp`. It controls sampling randomness: lower values make generation more deterministic and repeatable, while higher values allow more varied token choices. The current coder profile uses `0.3` as a conservative coding/agent default. Temperature changes sampling behavior, not the model weights or context size. Current llama.cpp documentation reports a server default of 0.8 when temperature is not explicitly supplied, so the launcher stores it explicitly per profile for predictable behavior.
 
 The GUI also shows system RAM/VRAM and the RAM/VRAM reported for the llama serve process. NVIDIA VRAM is read through the optional driver-provided NVML library; if NVML is unavailable, the launcher shows `VRAM: unavailable` without starting `nvidia-smi` or another helper process.
 
