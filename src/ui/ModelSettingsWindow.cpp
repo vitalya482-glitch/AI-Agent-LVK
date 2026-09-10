@@ -51,7 +51,7 @@ HWND addStatic(HWND parent, int x, int y, int w, int h, const wchar_t* value) {
 
 HWND addEdit(HWND parent, int x, int y, int w, const std::wstring& value) {
     return CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", value.c_str(),
-        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, x, y, w, 120, 24,
+        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, x, y, w, 24,
         parent, nullptr, nullptr, nullptr);
 }
 
