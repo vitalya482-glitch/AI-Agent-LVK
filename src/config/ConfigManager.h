@@ -13,6 +13,12 @@ struct Profile {
     double presencePenalty = 0.0, repeatPenalty = 1.0, frequencyPenalty = 0.0;
     std::string kvK = "q8_0", kvV = "q8_0", tools = "all", toolsRuntime = "docker:ai-cpp-sandbox";
     bool flashAttention = true;
+
+    // Speculative decoding. MTP controls are enabled in the GUI only for
+    // profiles whose GGUF is known to contain compatible MTP heads.
+    bool mtpSupported = false;
+    std::string specType = "none";
+    int specDraftNMax = 2;
 };
 struct Settings {
     std::string llamaCommand = "llama", host = "127.0.0.1";
