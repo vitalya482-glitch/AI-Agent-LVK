@@ -23,7 +23,12 @@ struct State {
 };
 
 std::wstring wide(const std::string& s) { return {s.begin(), s.end()}; }
-std::string narrow(const std::wstring& s) { return {s.begin(), s.end()}; }
+std::string narrow(const std::wstring& s) {
+    std::string result;
+    result.reserve(s.size());
+    for (const wchar_t ch : s) result.push_back(static_cast<char>(ch));
+    return result;
+}
 
 std::wstring text(HWND control) {
     const int length = GetWindowTextLengthW(control);
@@ -46,7 +51,7 @@ HWND addStatic(HWND parent, int x, int y, int w, int h, const wchar_t* value) {
 
 HWND addEdit(HWND parent, int x, int y, int w, const std::wstring& value) {
     return CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", value.c_str(),
-        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, x, y, w, 24,
+        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, x, y, w, 120, 24,
         parent, nullptr, nullptr, nullptr);
 }
 
