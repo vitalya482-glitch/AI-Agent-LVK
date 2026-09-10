@@ -36,7 +36,7 @@ constexpr std::array<SamplingPreset, 3> kSamplingPresets = {{
 enum Field : size_t {
     Context, Temperature, TopK, TopP, PresencePenalty, RepeatPenalty,
     FrequencyPenalty, BatchSize, UBatchSize, Parallel, GpuLayers, CpuMoe,
-    KvK, KvV, FlashAttention, SpecType, SpecDraftNMax, FieldCount
+    KvK, KvV, FlashAttention, AgentTurnLimit, SpecType, SpecDraftNMax, FieldCount
 };
 
 struct State {
@@ -228,6 +228,11 @@ bool saveValues(HWND window, State& s) {
     updated.kvK = comboValue(s.controls[KvK]);
     updated.kvV = comboValue(s.controls[KvV]);
     updated.flashAttention = comboValue(s.controls[FlashAttention]);
+    const auto agentLimit = comboValue(s.controls[AgentTurnLimit]);
+    if (agentLimit == "Off") updated.agentTurnLimit = 0;
+    else if (agentLimit == "Unlimited") updated.agentTurnLimit = -1;
+    else if (agentLimit == "10" || agentLimit == "20" || agentLimit == "50" || agentLimit == "100") updated.agentTurnLimit = std::stoi(agentLimit);
+    else ok = false;
 
     if (updated.mtpSupported && updated.mtpFileAvailable) {
         updated.specType = comboValue(s.controls[SpecType]);
@@ -312,6 +317,12 @@ LRESULT CALLBACK proc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
         addStatic(window,20,y+4,170,20,L"Flash Attention");
         s->controls[FlashAttention]=addCombo(window,195,y,120,flashModes,std::size(flashModes),wide(p.flashAttention));
         addStatic(window,330,y+2,420,34,L"--flash-attn on/auto/off. ON is our default for Qwen on NVIDIA; AUTO lets llama.cpp decide."); y+=40;
+
+        const wchar_t* agentTurnLimits[] = {L"Off",L"10",L"20",L"50",L"100",L"Unlimited"};
+        const auto agentLimit = p.agentTurnLimit == 0 ? std::wstring(L"Off") : p.agentTurnLimit < 0 ? std::wstring(L"Unlimited") : std::to_wstring(p.agentTurnLimit);
+        addStatic(window,20,y+4,170,20,L"Agent turn limit");
+        s->controls[AgentTurnLimit]=addCombo(window,195,y,120,agentTurnLimits,std::size(agentTurnLimits),agentLimit);
+        addStatic(window,330,y+2,420,34,L"Web UI agenticMaxTurns. Off leaves the Web UI default; Unlimited uses the supported Infinity value."); y+=36;
 
         const wchar_t* specTypes[] = {L"none",L"draft-mtp"};
         addStatic(window,20,y+4,170,20,L"Speculative type");

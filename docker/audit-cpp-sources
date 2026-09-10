@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -ne 1 ]; then
+    echo "Usage: audit-cpp-sources /workspace/project" >&2
+    exit 2
+fi
+
+project_dir="$(realpath "$1")"
+case "$project_dir" in
+    /workspace|/workspace/*) ;;
+    *) echo "Project must be under /workspace: $project_dir" >&2; exit 2 ;;
+esac
+
+status=0
+while IFS= read -r -d '' source; do
+    findings="$(perl -0777 -ne '
+        while (/\bdo\s*\{([^{}]*)\}\s*while\s*\(\s*true\s*\)\s*;/g) {
+            my $body = $1;
+            next if $body =~ /AI_AGENT_ALLOW_INFINITE_LOOP/;
+            next if $body =~ /\bbreak\s*;/;
+            my $line = 1 + (substr($_, 0, $-[0]) =~ tr/\n//);
+            print "$line: do/while(true) has no break\n";
+        }
+        while (/\bwhile\s*\(\s*true\s*\)\s*\{([^{}]*)\}/g) {
+            my $body = $1;
+            next if $body =~ /AI_AGENT_ALLOW_INFINITE_LOOP/;
+            next if $body =~ /\bbreak\s*;/;
+            my $line = 1 + (substr($_, 0, $-[0]) =~ tr/\n//);
+            print "$line: while(true) has no break\n";
+        }
+    ' "$source")"
+    if [ -n "$findings" ]; then
+        relative="${source#${project_dir}/}"
+        while IFS= read -r finding; do
+            echo "$relative:$finding" >&2
+        done <<< "$findings"
+        status=1
+    fi
+done < <(
+    find "$project_dir" -type f \( -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' -o -iname '*.h' -o -iname '*.hpp' \) \
+        -not -path '*/build/*' -not -path '*/build-*/*' -not -path '*/.git/*' -not -path '*/vendor/*' -not -path '*/third_party/*' -print0
+)
+
+if [ "$status" -ne 0 ]; then
+    echo 'Source audit failed. Add a terminating break/condition, or document an intentional loop with AI_AGENT_ALLOW_INFINITE_LOOP.' >&2
+    exit "$status"
+fi

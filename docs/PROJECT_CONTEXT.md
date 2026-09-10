@@ -63,7 +63,13 @@ The default `Qwen3-Coder-30B-A3B` profile currently uses:
 
 ## Model Settings UI
 
-The main launcher toolbar contains a **Model Settings** button. It opens a native Win32 per-profile editor with short explanations beside every currently discussed tuning parameter: context, temperature, top-k, top-p, presence/repeat/frequency penalties, batch size, ubatch size, parallel slots, GPU layers, CPU MoE layers, K/V cache types, Flash Attention, `spec_type`, and `spec_draft_n_max`. Values are persisted to the selected profile and become active after Start/Restart.
+The main launcher toolbar contains a **Model Settings** button. It opens a native Win32 per-profile editor with short explanations beside every currently discussed tuning parameter: context, temperature, top-k, top-p, presence/repeat/frequency penalties, batch size, ubatch size, parallel slots, GPU layers, CPU MoE layers, K/V cache types, Flash Attention, agent turn limit, `spec_type`, and `spec_draft_n_max`. Values are persisted to the selected profile and become active after Start/Restart.
+
+Agent turn limit is stored as `agent_turn_limit`: `0` means Off, `10`, `20`,
+`50` and `100` are explicit limits, and `-1` means Unlimited. llama.cpp has no
+server CLI flag for this Web UI-only setting. The launcher therefore omits the
+override for Off and otherwise passes `--ui-config {"agenticMaxTurns":N}`;
+Unlimited passes the supported Web UI `"Infinity"` value.
 
 Flash Attention is tri-state profile data: `on`, `auto`, or `off`. The current Qwen3-Coder profile uses `on`. `LlamaManager` emits the explicit long-form argument `--flash-attn <mode>`. Existing configs using the older boolean form remain compatible: `true` is loaded as `on`, `false` as `off`. The GUI exposes all three modes in a drop-down so future profiles can use llama.cpp's `auto` behavior when appropriate.
 

@@ -18,6 +18,7 @@ Profile decode(const Json& j, bool legacy) {
 #define STR(key,member) p.member=j.at(key).str(p.member)
     INT("context",context);INT("max_context",maxContext);INT("parallel",parallel);INT("gpu_layers",gpuLayers);INT("cpu_moe",cpuMoe);
     INT("top_k",topK);INT("batch_size",batchSize);INT("ubatch_size",ubatchSize);INT("spec_draft_n_max",specDraftNMax);
+    INT("agent_turn_limit",agentTurnLimit);
     NUM("temperature",temperature);NUM("top_p",topP);NUM("presence_penalty",presencePenalty);NUM("repeat_penalty",repeatPenalty);NUM("frequency_penalty",frequencyPenalty);
     STR("kv_k",kvK);STR("kv_v",kvV);STR("tools",tools);STR("tools_runtime",toolsRuntime);STR("spec_type",specType);
 #undef INT
@@ -30,6 +31,8 @@ Profile decode(const Json& j, bool legacy) {
     if(p.model.wstring().find(L'\0')!=std::wstring::npos)throw std::runtime_error("Invalid model path.");
     p.model=std::filesystem::absolute(p.model).lexically_normal();
     if(p.context<=0||p.maxContext<=0)throw std::runtime_error("Invalid model context.");
+    if(p.agentTurnLimit!=-1&&p.agentTurnLimit!=0&&p.agentTurnLimit!=10&&p.agentTurnLimit!=20&&p.agentTurnLimit!=50&&p.agentTurnLimit!=100)
+        throw std::runtime_error("Invalid agent turn limit.");
     return p;
 }
 Json encode(const Profile& p) {
@@ -40,7 +43,7 @@ Json encode(const Profile& p) {
         {"temperature",p.temperature},{"top_k",p.topK},{"top_p",p.topP},{"presence_penalty",p.presencePenalty},
         {"repeat_penalty",p.repeatPenalty},{"frequency_penalty",p.frequencyPenalty},{"batch_size",p.batchSize},
         {"ubatch_size",p.ubatchSize},{"kv_k",p.kvK},{"kv_v",p.kvV},{"flash_attention",p.flashAttention},
-        {"tools",p.tools},{"tools_runtime",p.toolsRuntime},{"mtp_supported",p.mtpSupported},
+        {"tools",p.tools},{"tools_runtime",p.toolsRuntime},{"agent_turn_limit",p.agentTurnLimit},{"mtp_supported",p.mtpSupported},
         {"spec_type",p.specType},{"spec_draft_n_max",p.specDraftNMax}
     };
 }

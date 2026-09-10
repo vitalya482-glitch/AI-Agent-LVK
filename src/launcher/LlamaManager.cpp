@@ -41,6 +41,10 @@ std::wstring LlamaManager::commandLine(const config::Settings& s, const config::
         + L" --tools-runtime " + arg(p.toolsRuntime)
         + L" --host " + arg(s.host)
         + L" --port " + std::to_wstring(s.port);
+    if (p.agentTurnLimit != 0) {
+        const auto limit = p.agentTurnLimit < 0 ? std::string("\"Infinity\"") : std::to_string(p.agentTurnLimit);
+        line += L" --ui-config " + arg(std::string("{\"agenticMaxTurns\":") + limit + "}");
+    }
     return line;
 }
 

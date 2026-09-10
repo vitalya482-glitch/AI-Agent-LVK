@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -ne 1 ]; then
+    echo "Usage: build-windows-sdl2 /workspace/project" >&2
+    exit 2
+fi
+
+project_dir="$(realpath "$1")"
+case "$project_dir" in
+    /workspace|/workspace/*) ;;
+    *) echo "Project must be under /workspace: $project_dir" >&2; exit 2 ;;
+esac
+
+build_dir="$project_dir/build-win"
+/usr/local/bin/audit-cpp-sources "$project_dir"
+cmake -S "$project_dir" -B "$build_dir" \
+    -DCMAKE_TOOLCHAIN_FILE=/opt/ai-agent/mingw64.cmake \
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build "$build_dir" --parallel
+
+runtime_roots=(
+    "$MINGW_SDL2_ROOT/bin"
+    /usr/x86_64-w64-mingw32/bin
+    /usr/lib/gcc/x86_64-w64-mingw32
+)
+
+exe_count=0
+while IFS= read -r -d '' exe; do
+    exe_count=$((exe_count + 1))
+    format="$(file -b "$exe")"
+    if ! grep -Eiq 'PE32\+ executable.*x86-64.*MS Windows' <<< "$format"; then
+        echo "Refusing non-Windows-x64 deliverable: $exe ($format)" >&2
+        exit 1
+    fi
+    exe_dir="$(dirname "$exe")"
+    while IFS= read -r dll; do
+        [ -n "$dll" ] || continue
+        for root in "${runtime_roots[@]}"; do
+            source="$(find "$root" -type f -iname "$dll" -print -quit 2>/dev/null || true)"
+            if [ -n "$source" ]; then
+                target="$exe_dir/$(basename "$source")"
+                if [ "$(realpath -m "$source")" != "$(realpath -m "$target")" ]; then
+                    cp -f "$source" "$target"
+                fi
+                break
+            fi
+        done
+    done < <(x86_64-w64-mingw32-objdump -p "$exe" | awk '/DLL Name:/{print $3}')
+done < <(find "$build_dir" -type f -iname '*.exe' -print0)
+
+if [ "$exe_count" -eq 0 ]; then
+    echo "No Windows .exe was produced under $build_dir" >&2
+    exit 1
+fi

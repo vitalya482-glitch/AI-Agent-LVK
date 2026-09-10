@@ -17,6 +17,8 @@ struct Profile {
     std::string kvK = "q8_0", kvV = "q8_0";
     std::string flashAttention = "on";
     std::string tools = "all", toolsRuntime = "docker:ai-cpp-sandbox";
+    // Web UI agentic loop limit: 0 = do not override Web UI, -1 = Infinity.
+    int agentTurnLimit = 0;
 
     // Highest context size this profile is intended to expose in the GUI.
     // The Model Settings slider uses discrete power-of-two-ish positions and

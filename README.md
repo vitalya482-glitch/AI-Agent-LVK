@@ -120,6 +120,7 @@ profile uses the following editable runtime values:
   "presence_penalty": 0.0, "repeat_penalty": 1.0, "frequency_penalty": 0.0,
   "batch_size": 512, "ubatch_size": 253,
   "kv_k": "q8_0", "kv_v": "q8_0", "flash_attention": "on",
+  "agent_turn_limit": 0,
   "mtp_supported": false, "mtp_model_path": "",
   "spec_type": "none", "spec_draft_n_max": 2,
   "tools": "all", "tools_runtime": "docker:ai-cpp-sandbox"
@@ -134,6 +135,12 @@ remain conservative.
 Existing Qwen3.6 registrations receive this capability update without changing
 their current context or other per-model settings.
 CPU MoE 27 is an initial setting, not a hardware-independent optimum.
+
+Model Settings also stores the per-model **Agent turn limit** (`Off`, `10`, `20`,
+`50`, `100`, or `Unlimited`). The launcher passes this to the llama.cpp Web UI
+through its supported `--ui-config` setting `agenticMaxTurns`: `Off` omits the
+override, numeric values set the limit, and `Unlimited` uses the Web UI's
+supported `Infinity` value.
 
 Flash Attention accepts `on`, `auto`, `off`; legacy booleans migrate to on/off.
 MTP requires BOTH explicit `mtp_supported=true` and an existing separate
@@ -173,6 +180,9 @@ It does not use the Docker socket, privileged mode, or broad host-directory moun
 Persistent project files and deliverables must stay under `/workspace`; `/tmp` is
 for disposable intermediate data. Rebuild Sandbox rebuilds only the image and
 never deletes or modifies the host workspace.
+The image provides the native C/C++ toolchain, SDL2 development libraries,
+ncurses, OpenSSL, zlib, Boost, and MinGW-w64. Python, Node.js, .NET, desktop
+GUI stacks, Docker socket access, and privileged mode are not added.
 
 ## Using the launcher
 
