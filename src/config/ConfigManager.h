@@ -11,8 +11,9 @@ struct Profile {
     int topK = 20, batchSize = 512, ubatchSize = 253;
     double temperature = 0.3, topP = 0.95;
     double presencePenalty = 0.0, repeatPenalty = 1.0, frequencyPenalty = 0.0;
-    std::string kvK = "q8_0", kvV = "q8_0", tools = "all", toolsRuntime = "docker:ai-cpp-sandbox";
-    bool flashAttention = true;
+    std::string kvK = "q8_0", kvV = "q8_0";
+    std::string flashAttention = "on";
+    std::string tools = "all", toolsRuntime = "docker:ai-cpp-sandbox";
 
     // Speculative decoding. MTP controls are enabled in the GUI only for
     // profiles whose GGUF is known to contain compatible MTP heads.
