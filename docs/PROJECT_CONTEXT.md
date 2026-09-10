@@ -14,8 +14,25 @@ The default endpoint is `127.0.0.1:8080`. `G:\AI\workspace` is the default works
 
 ## Configuration and profiles
 
-`ConfigManager` owns the small JSON-shaped `config.json` beside the executable. Profiles contain model path and llama serve tuning such as context, parallelism, GPU layers, MoE CPU layers, KV types, flash attention, and tools runtime. The last selected profile is persisted.
-The default `Qwen3-Coder-30B-A3B` profile uses a 16384-token context. Existing configs are migrated from the original 8192 default only when that profile still has exactly 8192; other user values are preserved.
+`ConfigManager` owns the small JSON-shaped `config.json` beside the executable. Profiles contain model path and llama serve tuning such as context, parallelism, GPU layers, MoE CPU layers, temperature, KV types, flash attention, and tools runtime. The last selected profile is persisted.
+
+The default `Qwen3-Coder-30B-A3B` profile currently uses:
+
+- context: 32768 tokens;
+- temperature: 0.3;
+- parallel slots: 1;
+- GPU layers: 999;
+- CPU MoE layers: 27;
+- K/V cache: q8_0;
+- flash attention: on;
+- tools: all;
+- tools runtime: docker:ai-cpp-sandbox.
+
+`temperature` is a per-profile sampling parameter passed to llama.cpp as `--temp`. Lower values make token selection more deterministic and repeatable; higher values increase variation. For coding/agent use the current baseline is 0.3. Keep this parameter configurable because future model profiles may need different sampling settings.
+
+Existing Qwen3-Coder configs are migrated from the earlier stock context values 8192 or 16384 to 32768 only when they still match those old defaults; other explicitly chosen context values are preserved.
+
+Future launcher tuning work should continue exposing model/runtime parameters through profiles rather than hardcoding them. Parameters discussed during model tuning should be documented with a short explanation of what they control and should remain independently configurable per model profile.
 
 The Win32 GUI includes a background memory monitor. It uses `GlobalMemoryStatusEx` for system RAM, `GetProcessMemoryInfo` for the launcher-owned llama process, and optional dynamically loaded NVML for GPU memory. Missing NVML is reported as unavailable without an external helper process.
 
