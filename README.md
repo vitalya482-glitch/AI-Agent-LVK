@@ -43,9 +43,13 @@ On first start the launcher creates `config.json` beside the executable. Edit it
       "gpu_layers": 999,
       "cpu_moe": 27,
       "temperature": 0.3,
+      "top_k": 20,
+      "top_p": 0.95,
       "presence_penalty": 0.0,
       "repeat_penalty": 1.0,
       "frequency_penalty": 0.0,
+      "batch_size": 512,
+      "ubatch_size": 253,
       "kv_k": "q8_0",
       "kv_v": "q8_0",
       "flash_attention": true,
@@ -60,7 +64,7 @@ On first start the launcher creates `config.json` beside the executable. Edit it
 
 The default `Qwen3-Coder-30B-A3B` profile now uses a 32768-token context. Existing configs that still have the earlier stock values 8192 or 16384 for that profile are migrated to 32768; other user-selected context values are preserved.
 
-`temperature` is passed to `llama serve` as `--temp`. It controls sampling randomness: lower values make generation more deterministic and repeatable, while higher values allow more varied token choices. The current coder profile uses `0.3` as a conservative coding/agent default. Temperature changes sampling behavior, not the model weights or context size.
+Sampling defaults for the current coding profile are `temperature = 0.3`, `top_k = 20`, and `top_p = 0.95`. They are passed to llama.cpp as `--temp`, `--top-k`, and `--top-p`. Temperature controls sampling randomness, top-k limits the candidate set to the most probable K tokens, and top-p keeps the smallest candidate set whose cumulative probability reaches P. They remain independently configurable per model profile.
 
 The coder profile also stores the main repetition-related penalties explicitly:
 
@@ -69,6 +73,8 @@ The coder profile also stores the main repetition-related penalties explicitly:
 - `frequency_penalty = 0.0` — disabled; does not increasingly penalize tokens according to how often they already appeared.
 
 These values are intentionally neutral for coding because source code naturally repeats identifiers, keywords, types, paths, JSON keys, and command fragments. They are passed to llama.cpp as `--presence-penalty`, `--repeat-penalty`, and `--frequency-penalty`, and remain independently configurable per model profile.
+
+Prompt processing batch settings are also stored per profile. The current values are `batch_size = 512` and `ubatch_size = 253`, passed as `--batch-size 512` and `--ubatch-size 253`. `batch_size` controls the maximum logical prompt batch size, while `ubatch_size` controls the physical micro-batch used during prompt evaluation. These are runtime performance/memory tuning parameters rather than sampling parameters.
 
 The GUI also shows system RAM/VRAM and the RAM/VRAM reported for the llama serve process. NVIDIA VRAM is read through the optional driver-provided NVML library; if NVML is unavailable, the launcher shows `VRAM: unavailable` without starting `nvidia-smi` or another helper process.
 
