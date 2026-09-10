@@ -1,6 +1,8 @@
 #include "ui/ModelSettingsWindow.h"
+#include <commctrl.h>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
@@ -9,6 +11,26 @@ namespace lvk::ui {
 namespace {
 constexpr wchar_t kClassName[] = L"AI-Agent-LVK-ModelSettings";
 constexpr int kSave = 9001, kCancel = 9002;
+
+constexpr std::array<int, 9> kContextSizes = {
+    8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152
+};
+
+struct SamplingPreset {
+    const wchar_t* name;
+    double temperature;
+    int topK;
+    double topP;
+    double presencePenalty;
+    double repeatPenalty;
+    double frequencyPenalty;
+};
+
+constexpr std::array<SamplingPreset, 3> kSamplingPresets = {{
+    {L"Coding", 0.30, 20, 0.95, 0.00, 1.00, 0.00},
+    {L"Creative", 0.80, 50, 0.95, 0.30, 1.05, 0.20},
+    {L"Chaos / hallucination", 1.30, 100, 1.00, 0.80, 1.10, 0.50},
+}};
 
 enum Field : size_t {
     Context, Temperature, TopK, TopP, PresencePenalty, RepeatPenalty,
@@ -19,6 +41,9 @@ enum Field : size_t {
 struct State {
     config::Profile* profile{};
     std::array<HWND, FieldCount> controls{};
+    HWND presetCombo{};
+    HWND contextDescription{};
+    bool applyingPreset = false;
     bool saved = false;
 };
 
@@ -58,7 +83,7 @@ HWND addEdit(HWND parent, int x, int y, int w, const std::wstring& value) {
 HWND addCombo(HWND parent, int x, int y, int w, const wchar_t* const* values,
               size_t count, const std::wstring& selected) {
     HWND combo = CreateWindowW(L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
-        x, y, w, 200, parent, nullptr, nullptr, nullptr);
+        x, y, w, 220, parent, nullptr, nullptr, nullptr);
     for (size_t i = 0; i < count; ++i) SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(values[i]));
     SendMessageW(combo, CB_SELECTSTRING, static_cast<WPARAM>(-1), reinterpret_cast<LPARAM>(selected.c_str()));
     if (SendMessageW(combo, CB_GETCURSEL, 0, 0) == CB_ERR) SendMessageW(combo, CB_SETCURSEL, 0, 0);
@@ -100,10 +125,98 @@ std::string comboValue(HWND combo) {
     return narrow(buffer);
 }
 
+bool same(double a, double b) {
+    return std::abs(a - b) < 0.000001;
+}
+
+bool matchesPreset(const config::Profile& p, const SamplingPreset& preset) {
+    return same(p.temperature, preset.temperature) && p.topK == preset.topK &&
+        same(p.topP, preset.topP) && same(p.presencePenalty, preset.presencePenalty) &&
+        same(p.repeatPenalty, preset.repeatPenalty) && same(p.frequencyPenalty, preset.frequencyPenalty);
+}
+
+std::wstring currentPresetName(const config::Profile& p) {
+    for (const auto& preset : kSamplingPresets) {
+        if (matchesPreset(p, preset)) return preset.name;
+    }
+    return L"Custom";
+}
+
+const SamplingPreset* findPreset(const std::wstring& name) {
+    for (const auto& preset : kSamplingPresets) {
+        if (name == preset.name) return &preset;
+    }
+    return nullptr;
+}
+
+void setEdit(HWND control, const std::wstring& value) {
+    SetWindowTextW(control, value.c_str());
+}
+
+void applyPreset(State& s, const SamplingPreset& preset) {
+    s.applyingPreset = true;
+    setEdit(s.controls[Temperature], number(preset.temperature));
+    setEdit(s.controls[TopK], std::to_wstring(preset.topK));
+    setEdit(s.controls[TopP], number(preset.topP));
+    setEdit(s.controls[PresencePenalty], number(preset.presencePenalty));
+    setEdit(s.controls[RepeatPenalty], number(preset.repeatPenalty));
+    setEdit(s.controls[FrequencyPenalty], number(preset.frequencyPenalty));
+    s.applyingPreset = false;
+}
+
+bool isSamplingControl(const State& s, HWND control) {
+    return control == s.controls[Temperature] || control == s.controls[TopK] ||
+        control == s.controls[TopP] || control == s.controls[PresencePenalty] ||
+        control == s.controls[RepeatPenalty] || control == s.controls[FrequencyPenalty];
+}
+
+void selectCustomPreset(State& s) {
+    if (s.applyingPreset || !s.presetCombo) return;
+    SendMessageW(s.presetCombo, CB_SELECTSTRING, static_cast<WPARAM>(-1), reinterpret_cast<LPARAM>(L"Custom"));
+}
+
+int contextMaxIndex(const config::Profile& p) {
+    int result = 0;
+    for (size_t i = 0; i < kContextSizes.size(); ++i) {
+        if (kContextSizes[i] <= p.maxContextCapability()) result = static_cast<int>(i);
+    }
+    return result;
+}
+
+int nearestContextIndex(int value, int maxIndex) {
+    int best = 0;
+    long long bestDistance = std::llabs(static_cast<long long>(value) - kContextSizes[0]);
+    for (int i = 1; i <= maxIndex; ++i) {
+        const long long distance = std::llabs(static_cast<long long>(value) - kContextSizes[static_cast<size_t>(i)]);
+        if (distance < bestDistance) {
+            best = i;
+            bestDistance = distance;
+        }
+    }
+    return best;
+}
+
+std::wstring shortContext(int value) {
+    if (value >= 1048576 && value % 1048576 == 0) return std::to_wstring(value / 1048576) + L"M";
+    return std::to_wstring(value / 1024) + L"K";
+}
+
+void updateContextDescription(State& s) {
+    if (!s.controls[Context] || !s.contextDescription || !s.profile) return;
+    const int pos = static_cast<int>(SendMessageW(s.controls[Context], TBM_GETPOS, 0, 0));
+    const int context = kContextSizes[static_cast<size_t>(std::clamp(pos, 0, static_cast<int>(kContextSizes.size() - 1)))];
+    const std::wstring value = shortContext(context) + L" (" + std::to_wstring(context) +
+        L" tokens). Discrete steps; profile cap " + shortContext(s.profile->maxContextCapability()) + L".";
+    SetWindowTextW(s.contextDescription, value.c_str());
+}
+
 bool saveValues(HWND window, State& s) {
     auto updated = *s.profile;
     bool ok = true;
-    ok &= parseInt(s.controls[Context], 512, 1048576, updated.context);
+    const int contextPos = static_cast<int>(SendMessageW(s.controls[Context], TBM_GETPOS, 0, 0));
+    if (contextPos < 0 || contextPos > contextMaxIndex(updated)) ok = false;
+    else updated.context = kContextSizes[static_cast<size_t>(contextPos)];
+
     ok &= parseDouble(s.controls[Temperature], 0.0, 2.0, updated.temperature);
     ok &= parseInt(s.controls[TopK], 0, 100000, updated.topK);
     ok &= parseDouble(s.controls[TopP], 0.0, 1.0, updated.topP);
@@ -162,7 +275,24 @@ LRESULT CALLBACK proc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
         addStatic(window, 20, 36, 730, 22, L"Saved per profile. Changes take effect on the next Start/Restart.");
 
         int y = 66;
-        addRow(window,*s,Context,y,L"Context (tokens)",std::to_wstring(p.context),L"-c / ctx-size. Working context for chat, tools and files."); y+=36;
+        addStatic(window, 20, y + 4, 170, 20, L"Sampling preset");
+        const wchar_t* presetNames[] = {L"Coding", L"Creative", L"Chaos / hallucination", L"Custom"};
+        s->presetCombo = addCombo(window, 195, y, 180, presetNames, std::size(presetNames), currentPresetName(p));
+        addStatic(window, 390, y + 2, 360, 34, L"Changes sampling only. Hardware, context, KV and tools stay untouched.");
+        y += 40;
+
+        addStatic(window, 20, y + 4, 170, 20, L"Context");
+        s->controls[Context] = CreateWindowExW(0, TRACKBAR_CLASSW, L"",
+            WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_AUTOTICKS,
+            195, y - 2, 120, 30, window, nullptr, nullptr, nullptr);
+        const int maxContextIndex = contextMaxIndex(p);
+        SendMessageW(s->controls[Context], TBM_SETRANGE, TRUE, MAKELPARAM(0, maxContextIndex));
+        SendMessageW(s->controls[Context], TBM_SETTICFREQ, 1, 0);
+        SendMessageW(s->controls[Context], TBM_SETPOS, TRUE, nearestContextIndex(p.context, maxContextIndex));
+        s->contextDescription = addStatic(window, 330, y + 2, 420, 34, L"");
+        updateContextDescription(*s);
+        y += 36;
+
         addRow(window,*s,Temperature,y,L"Temperature",number(p.temperature),L"--temp. Lower = more deterministic; higher = more varied."); y+=36;
         addRow(window,*s,TopK,y,L"Top K",std::to_wstring(p.topK),L"--top-k. Keep only K most likely token candidates."); y+=36;
         addRow(window,*s,TopP,y,L"Top P",number(p.topP),L"--top-p. Nucleus sampling probability-mass cutoff."); y+=36;
@@ -206,10 +336,29 @@ LRESULT CALLBACK proc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
         CreateWindowW(L"BUTTON",L"Cancel",WS_CHILD|WS_VISIBLE,655,y,85,28,window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(kCancel)),nullptr,nullptr);
         return 0;
     }
-    case WM_COMMAND:
-        if (LOWORD(wParam)==kSave && HIWORD(wParam)==BN_CLICKED) { saveValues(window,*s); return 0; }
-        if (LOWORD(wParam)==kCancel && HIWORD(wParam)==BN_CLICKED) { DestroyWindow(window); return 0; }
+    case WM_HSCROLL:
+        if (reinterpret_cast<HWND>(lParam) == s->controls[Context]) {
+            updateContextDescription(*s);
+            return 0;
+        }
         break;
+    case WM_COMMAND: {
+        const HWND source = reinterpret_cast<HWND>(lParam);
+        const WORD notification = HIWORD(wParam);
+        if (LOWORD(wParam)==kSave && notification==BN_CLICKED) { saveValues(window,*s); return 0; }
+        if (LOWORD(wParam)==kCancel && notification==BN_CLICKED) { DestroyWindow(window); return 0; }
+        if (source == s->presetCombo && notification == CBN_SELCHANGE) {
+            const auto selected = comboValue(s->presetCombo);
+            const auto selectedWide = wide(selected);
+            if (const auto* preset = findPreset(selectedWide)) applyPreset(*s, *preset);
+            return 0;
+        }
+        if (notification == EN_CHANGE && isSamplingControl(*s, source)) {
+            selectCustomPreset(*s);
+            return 0;
+        }
+        break;
+    }
     case WM_CLOSE: DestroyWindow(window); return 0;
     }
     return DefWindowProcW(window,message,wParam,lParam);
@@ -225,9 +374,14 @@ bool ensureClass() {
 }
 
 bool showModelSettings(HWND parent, config::Profile& profile, std::string& error) {
+    INITCOMMONCONTROLSEX commonControls{sizeof(INITCOMMONCONTROLSEX), ICC_BAR_CLASSES};
+    if (!InitCommonControlsEx(&commonControls)) {
+        error = "Could not initialize Windows trackbar controls.";
+        return false;
+    }
     if(!ensureClass()){error="Could not register Model Settings window class.";return false;}
     State state{&profile};
-    HWND window=CreateWindowExW(WS_EX_DLGMODALFRAME,kClassName,L"Model Settings",WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,790,840,parent,nullptr,GetModuleHandleW(nullptr),&state);
+    HWND window=CreateWindowExW(WS_EX_DLGMODALFRAME,kClassName,L"Model Settings",WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,790,880,parent,nullptr,GetModuleHandleW(nullptr),&state);
     if(!window){error="Could not create Model Settings window.";return false;}
 
     RECT pr{},wr{};
