@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Checkout release source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           submodules: recursive
@@ -74,6 +74,14 @@ jobs:
           Write-Host "Package: $zipPath"
           Write-Host "SHA256: $sha256"
           Write-Host "Size: $size bytes"
+
+      - name: Upload package as Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Agent-LVK-win-x64-${{ env.VERSION }}
+          path: AI-Agent-LVK-win-x64.zip
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Create or update GitHub Release
         shell: pwsh
