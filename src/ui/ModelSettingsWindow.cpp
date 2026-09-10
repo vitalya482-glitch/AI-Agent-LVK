@@ -1,6 +1,5 @@
 #include "ui/ModelSettingsWindow.h"
 #include <array>
-#include <charconv>
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
@@ -27,8 +26,9 @@ std::string narrow(const std::wstring& s) { return {s.begin(), s.end()}; }
 
 std::wstring text(HWND control) {
     const int length = GetWindowTextLengthW(control);
-    std::wstring value(static_cast<size_t>(length), L'\0');
+    std::wstring value(static_cast<size_t>(length) + 1, L'\0');
     if (length) GetWindowTextW(control, value.data(), length + 1);
+    value.resize(static_cast<size_t>(length));
     return value;
 }
 
@@ -49,7 +49,7 @@ HWND addEdit(HWND parent, int x, int y, int w, const std::wstring& value) {
         parent, nullptr, nullptr, nullptr);
 }
 
-HWND addCombo(HWND parent, int x, int y, int w, const std::array<const wchar_t*, 8>& values,
+HWND addCombo(HWND parent, int x, int y, int w, const wchar_t* const* values,
               size_t count, const std::wstring& selected) {
     HWND combo = CreateWindowW(L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
         x, y, w, 200, parent, nullptr, nullptr, nullptr);
@@ -63,7 +63,7 @@ void addRow(HWND window, State& s, Field field, int y, const wchar_t* label,
             const std::wstring& value, const wchar_t* help) {
     addStatic(window, 20, y + 4, 170, 20, label);
     s.controls[field] = addEdit(window, 195, y, 120, value);
-    addStatic(window, 330, y + 2, 400, 36, help);
+    addStatic(window, 330, y + 2, 420, 34, help);
 }
 
 bool parseInt(HWND control, int minValue, int maxValue, int& result) {
@@ -121,13 +121,11 @@ bool saveValues(HWND window, State& s) {
     }
 
     if (!ok || updated.kvK.empty() || updated.kvV.empty()) {
-        MessageBoxW(window, L"One or more values are invalid. Check the highlighted model settings and try again.",
-            L"Invalid model settings", MB_OK | MB_ICONWARNING);
+        MessageBoxW(window, L"One or more model settings are invalid.", L"Invalid settings", MB_OK | MB_ICONWARNING);
         return false;
     }
     if (updated.ubatchSize > updated.batchSize) {
-        MessageBoxW(window, L"ubatch-size must not be larger than batch-size.",
-            L"Invalid batch settings", MB_OK | MB_ICONWARNING);
+        MessageBoxW(window, L"ubatch-size must not be larger than batch-size.", L"Invalid batch settings", MB_OK | MB_ICONWARNING);
         return false;
     }
 
@@ -149,109 +147,91 @@ LRESULT CALLBACK proc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_CREATE: {
         auto& p = *s->profile;
-        addStatic(window, 20, 14, 710, 22, (L"Profile: " + wide(p.name)).c_str());
-        addStatic(window, 20, 39, 710, 22, L"Changes are stored per model profile and take effect on the next Start/Restart.");
+        const auto title = L"Profile: " + wide(p.name);
+        addStatic(window, 20, 12, 730, 22, title.c_str());
+        addStatic(window, 20, 36, 730, 22, L"Saved per profile. Changes take effect on the next Start/Restart.");
 
-        int y = 72;
-        addRow(window, *s, Context, y, L"Context (tokens)", std::to_wstring(p.context), L"-c / ctx-size. Maximum working context for chat, tools and file content."); y += 38;
-        addRow(window, *s, Temperature, y, L"Temperature", number(p.temperature), L"--temp. Lower = more deterministic; higher = more varied sampling."); y += 38;
-        addRow(window, *s, TopK, y, L"Top K", std::to_wstring(p.topK), L"--top-k. Limits sampling to the K most likely tokens."); y += 38;
-        addRow(window, *s, TopP, y, L"Top P", number(p.topP), L"--top-p. Nucleus sampling probability mass cutoff."); y += 38;
-        addRow(window, *s, PresencePenalty, y, L"Presence penalty", number(p.presencePenalty), L"--presence-penalty. Penalizes tokens that already appeared at least once."); y += 38;
-        addRow(window, *s, RepeatPenalty, y, L"Repeat penalty", number(p.repeatPenalty), L"--repeat-penalty. General repetition penalty; 1.0 disables it."); y += 38;
-        addRow(window, *s, FrequencyPenalty, y, L"Frequency penalty", number(p.frequencyPenalty), L"--frequency-penalty. Penalizes tokens more as their occurrence count grows."); y += 38;
-        addRow(window, *s, BatchSize, y, L"Batch size", std::to_wstring(p.batchSize), L"--batch-size. Logical prompt-processing batch size."); y += 38;
-        addRow(window, *s, UBatchSize, y, L"Ubatch size", std::to_wstring(p.ubatchSize), L"--ubatch-size. Physical compute batch; must be <= batch-size."); y += 38;
-        addRow(window, *s, Parallel, y, L"Parallel slots", std::to_wstring(p.parallel), L"-np. Number of simultaneous server slots; 1 is best for our single-user agent."); y += 38;
-        addRow(window, *s, GpuLayers, y, L"GPU layers", std::to_wstring(p.gpuLayers), L"-ngl. Layers requested for GPU offload; 999 means as many as possible."); y += 38;
-        addRow(window, *s, CpuMoe, y, L"CPU MoE layers", std::to_wstring(p.cpuMoe), L"-ncmoe. MoE layers whose expert weights stay in CPU/RAM."); y += 38;
+        int y = 66;
+        addRow(window,*s,Context,y,L"Context (tokens)",std::to_wstring(p.context),L"-c / ctx-size. Working context for chat, tools and files."); y+=36;
+        addRow(window,*s,Temperature,y,L"Temperature",number(p.temperature),L"--temp. Lower = more deterministic; higher = more varied."); y+=36;
+        addRow(window,*s,TopK,y,L"Top K",std::to_wstring(p.topK),L"--top-k. Keep only K most likely token candidates."); y+=36;
+        addRow(window,*s,TopP,y,L"Top P",number(p.topP),L"--top-p. Nucleus sampling probability-mass cutoff."); y+=36;
+        addRow(window,*s,PresencePenalty,y,L"Presence penalty",number(p.presencePenalty),L"--presence-penalty. Penalize tokens already seen once."); y+=36;
+        addRow(window,*s,RepeatPenalty,y,L"Repeat penalty",number(p.repeatPenalty),L"--repeat-penalty. General repetition penalty; 1.0 = off."); y+=36;
+        addRow(window,*s,FrequencyPenalty,y,L"Frequency penalty",number(p.frequencyPenalty),L"--frequency-penalty. Penalty grows with occurrence count."); y+=36;
+        addRow(window,*s,BatchSize,y,L"Batch size",std::to_wstring(p.batchSize),L"--batch-size. Logical prompt-processing batch size."); y+=36;
+        addRow(window,*s,UBatchSize,y,L"Ubatch size",std::to_wstring(p.ubatchSize),L"--ubatch-size. Physical compute batch; must be <= batch."); y+=36;
+        addRow(window,*s,Parallel,y,L"Parallel slots",std::to_wstring(p.parallel),L"-np. Simultaneous server slots; 1 suits our single-user agent."); y+=36;
+        addRow(window,*s,GpuLayers,y,L"GPU layers",std::to_wstring(p.gpuLayers),L"-ngl. Requested GPU offload; 999 = as many as possible."); y+=36;
+        addRow(window,*s,CpuMoe,y,L"CPU MoE layers",std::to_wstring(p.cpuMoe),L"-ncmoe. MoE expert layers kept in CPU/RAM."); y+=36;
 
-        const std::array<const wchar_t*, 8> kvTypes{L"q8_0", L"q4_0", L"q4_1", L"q5_0", L"q5_1", L"f16", L"bf16", L"f32"};
-        addStatic(window, 20, y + 4, 170, 20, L"KV cache K");
-        s->controls[KvK] = addCombo(window, 195, y, 120, kvTypes, kvTypes.size(), wide(p.kvK));
-        addStatic(window, 330, y + 2, 400, 36, L"-ctk. K-cache data type. q8_0 is our current memory/quality balance."); y += 38;
-        addStatic(window, 20, y + 4, 170, 20, L"KV cache V");
-        s->controls[KvV] = addCombo(window, 195, y, 120, kvTypes, kvTypes.size(), wide(p.kvV));
-        addStatic(window, 330, y + 2, 400, 36, L"-ctv. V-cache data type. q8_0 is our current memory/quality balance."); y += 38;
+        const wchar_t* kvTypes[] = {L"q8_0",L"q4_0",L"q4_1",L"q5_0",L"q5_1",L"f16",L"bf16",L"f32"};
+        addStatic(window,20,y+4,170,20,L"KV cache K");
+        s->controls[KvK]=addCombo(window,195,y,120,kvTypes,std::size(kvTypes),wide(p.kvK));
+        addStatic(window,330,y+2,420,34,L"-ctk. K-cache type; q8_0 is our current balance."); y+=36;
+        addStatic(window,20,y+4,170,20,L"KV cache V");
+        s->controls[KvV]=addCombo(window,195,y,120,kvTypes,std::size(kvTypes),wide(p.kvV));
+        addStatic(window,330,y+2,420,34,L"-ctv. V-cache type; q8_0 is our current balance."); y+=36;
 
-        addStatic(window, 20, y + 4, 170, 20, L"Flash Attention");
-        s->controls[FlashAttention] = CreateWindowW(L"BUTTON", L"Enabled", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-            195, y, 120, 24, window, nullptr, nullptr, nullptr);
-        SendMessageW(s->controls[FlashAttention], BM_SETCHECK, p.flashAttention ? BST_CHECKED : BST_UNCHECKED, 0);
-        addStatic(window, 330, y + 2, 400, 36, L"-fa on/off. Faster and usually more memory-efficient attention when supported."); y += 42;
+        addStatic(window,20,y+4,170,20,L"Flash Attention");
+        s->controls[FlashAttention]=CreateWindowW(L"BUTTON",L"Enabled",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,195,y,120,24,window,nullptr,nullptr,nullptr);
+        SendMessageW(s->controls[FlashAttention],BM_SETCHECK,p.flashAttention?BST_CHECKED:BST_UNCHECKED,0);
+        addStatic(window,330,y+2,420,34,L"-fa on/off. Faster and usually more memory-efficient attention."); y+=40;
 
-        addStatic(window, 20, y + 4, 170, 20, L"Speculative type");
-        const std::array<const wchar_t*, 8> specTypes{L"none", L"draft-mtp", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
-        s->controls[SpecType] = addCombo(window, 195, y, 120, specTypes, 2, wide(p.specType));
-        addStatic(window, 330, y + 2, 400, 36, L"--spec-type. draft-mtp uses MTP heads embedded in a compatible GGUF."); y += 38;
-        addRow(window, *s, SpecDraftNMax, y, L"Spec draft N max", std::to_wstring(p.specDraftNMax), L"--spec-draft-n-max. Maximum number of draft tokens proposed per speculative step."); y += 38;
+        const wchar_t* specTypes[] = {L"none",L"draft-mtp"};
+        addStatic(window,20,y+4,170,20,L"Speculative type");
+        s->controls[SpecType]=addCombo(window,195,y,120,specTypes,std::size(specTypes),wide(p.specType));
+        addStatic(window,330,y+2,420,34,L"--spec-type. draft-mtp uses MTP heads embedded in the GGUF."); y+=36;
+        addRow(window,*s,SpecDraftNMax,y,L"Spec draft N max",std::to_wstring(p.specDraftNMax),L"--spec-draft-n-max. Maximum draft tokens per speculative step."); y+=36;
 
         const wchar_t* capability = p.mtpSupported
-            ? L"MTP capability: supported for this profile. Speculative controls are available."
-            : L"MTP capability: not supported for this profile. Controls are disabled to prevent an invalid launch.";
-        addStatic(window, 20, y + 2, 710, 34, capability);
-        EnableWindow(s->controls[SpecType], p.mtpSupported ? TRUE : FALSE);
-        EnableWindow(s->controls[SpecDraftNMax], p.mtpSupported ? TRUE : FALSE);
-        y += 42;
+            ? L"MTP: supported by this profile - speculative controls are enabled."
+            : L"MTP: not supported by this profile - speculative controls are intentionally disabled.";
+        addStatic(window,20,y+2,730,28,capability);
+        EnableWindow(s->controls[SpecType],p.mtpSupported?TRUE:FALSE);
+        EnableWindow(s->controls[SpecDraftNMax],p.mtpSupported?TRUE:FALSE);
+        y+=34;
 
-        CreateWindowW(L"BUTTON", L"Save", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
-            550, y, 85, 28, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSave)), nullptr, nullptr);
-        CreateWindowW(L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE,
-            645, y, 85, 28, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kCancel)), nullptr, nullptr);
+        CreateWindowW(L"BUTTON",L"Save",WS_CHILD|WS_VISIBLE|BS_DEFPUSHBUTTON,560,y,85,28,window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSave)),nullptr,nullptr);
+        CreateWindowW(L"BUTTON",L"Cancel",WS_CHILD|WS_VISIBLE,655,y,85,28,window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(kCancel)),nullptr,nullptr);
         return 0;
     }
     case WM_COMMAND:
-        if (LOWORD(wParam) == kSave && HIWORD(wParam) == BN_CLICKED) { saveValues(window, *s); return 0; }
-        if (LOWORD(wParam) == kCancel && HIWORD(wParam) == BN_CLICKED) { DestroyWindow(window); return 0; }
+        if (LOWORD(wParam)==kSave && HIWORD(wParam)==BN_CLICKED) { saveValues(window,*s); return 0; }
+        if (LOWORD(wParam)==kCancel && HIWORD(wParam)==BN_CLICKED) { DestroyWindow(window); return 0; }
         break;
-    case WM_CLOSE:
-        DestroyWindow(window);
-        return 0;
+    case WM_CLOSE: DestroyWindow(window); return 0;
     }
-    return DefWindowProcW(window, message, wParam, lParam);
+    return DefWindowProcW(window,message,wParam,lParam);
 }
 
 bool ensureClass() {
-    static bool registered = false;
-    if (registered) return true;
-    WNDCLASSW wc{};
-    wc.lpfnWndProc = proc;
-    wc.hInstance = GetModuleHandleW(nullptr);
-    wc.lpszClassName = kClassName;
-    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-    registered = RegisterClassW(&wc) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
+    static bool registered=false;
+    if(registered)return true;
+    WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=kClassName;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);
+    registered=RegisterClassW(&wc)!=0 || GetLastError()==ERROR_CLASS_ALREADY_EXISTS;
     return registered;
 }
 }
 
 bool showModelSettings(HWND parent, config::Profile& profile, std::string& error) {
-    if (!ensureClass()) { error = "Could not register Model Settings window class."; return false; }
+    if(!ensureClass()){error="Could not register Model Settings window class.";return false;}
     State state{&profile};
-    HWND window = CreateWindowExW(WS_EX_DLGMODALFRAME, kClassName, L"Model Settings",
-        WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, CW_USEDEFAULT, CW_USEDEFAULT, 770, 755,
-        parent, nullptr, GetModuleHandleW(nullptr), &state);
-    if (!window) { error = "Could not create Model Settings window."; return false; }
+    HWND window=CreateWindowExW(WS_EX_DLGMODALFRAME,kClassName,L"Model Settings",WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,790,840,parent,nullptr,GetModuleHandleW(nullptr),&state);
+    if(!window){error="Could not create Model Settings window.";return false;}
 
-    RECT parentRect{}, windowRect{};
-    if (parent && GetWindowRect(parent, &parentRect) && GetWindowRect(window, &windowRect)) {
-        const int width = windowRect.right - windowRect.left;
-        const int height = windowRect.bottom - windowRect.top;
-        const int x = parentRect.left + ((parentRect.right - parentRect.left) - width) / 2;
-        const int y = parentRect.top + ((parentRect.bottom - parentRect.top) - height) / 2;
-        SetWindowPos(window, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+    RECT pr{},wr{};
+    if(parent&&GetWindowRect(parent,&pr)&&GetWindowRect(window,&wr)){
+        const int width=wr.right-wr.left,height=wr.bottom-wr.top;
+        const int x=std::max(10,pr.left+((pr.right-pr.left)-width)/2);
+        const int y=std::max(10,pr.top+((pr.bottom-pr.top)-height)/2);
+        SetWindowPos(window,nullptr,x,y,0,0,SWP_NOSIZE|SWP_NOZORDER);
     }
-
-    if (parent) EnableWindow(parent, FALSE);
-    ShowWindow(window, SW_SHOW);
-    UpdateWindow(window);
-
+    if(parent)EnableWindow(parent,FALSE);
+    ShowWindow(window,SW_SHOW);UpdateWindow(window);
     MSG msg{};
-    while (IsWindow(window) && GetMessageW(&msg, nullptr, 0, 0) > 0) {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
-    }
-    if (parent) { EnableWindow(parent, TRUE); SetForegroundWindow(parent); }
+    while(IsWindow(window)&&GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}
+    if(parent){EnableWindow(parent,TRUE);SetForegroundWindow(parent);}
     return state.saved;
 }
 }
