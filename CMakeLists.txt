@@ -23,6 +23,7 @@ add_executable(AI-Agent-LVK WIN32
     src/process/BackgroundWorker.cpp
     src/log/LogManager.cpp
     src/port/PortChecker.cpp
+    src/ui/ModelSettingsWindow.cpp
     src/update/UpdateManager.cpp
     src/update/UpdateCloseBridge.cpp
 )
