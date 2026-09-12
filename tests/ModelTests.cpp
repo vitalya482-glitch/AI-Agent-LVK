@@ -104,6 +104,12 @@ void registry(const fs::path& root){
     auto line=llama.commandLine(settings,qwen);int argc{};auto argv=CommandLineToArgvW((L"llama "+line).c_str(),&argc);
     require(argv&&argc>3&&std::wstring(argv[3])==qwen.model.wstring(),"selected model path quoted");LocalFree(argv);
     require(line.find(L"-c 8192 -np 1 -ngl 999 -ncmoe 27")!=std::wstring::npos,"Qwen runtime defaults");
+    auto noToolsRuntime=qwen;noToolsRuntime.toolsRuntime="none";
+    require(llama.commandLine(settings,noToolsRuntime).find(L"--tools-runtime")==std::wstring::npos,"none runtime omitted");
+    noToolsRuntime.toolsRuntime="disabled";
+    require(llama.commandLine(settings,noToolsRuntime).find(L"--tools-runtime")==std::wstring::npos,"disabled runtime omitted");
+    noToolsRuntime.toolsRuntime=" docker:ai-cpp-sandbox ";
+    require(llama.commandLine(settings,noToolsRuntime).find(L"--tools-runtime \" docker:ai-cpp-sandbox \"")!=std::wstring::npos,"real runtime preserved");
     require(llama.commandLine(settings,offQwen).find(L"--ui-config")==std::wstring::npos,"Off does not override Web UI agent turns");
     require(line.find(L"--ui-config")!=std::wstring::npos&&line.find(L"agenticMaxTurns")!=std::wstring::npos,"agent turn limit uses Web UI config");
     qwen.agentTurnLimit=-1;require(llama.commandLine(settings,qwen).find(L"Infinity")!=std::wstring::npos,"Unlimited uses Web UI Infinity config");

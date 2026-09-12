@@ -172,7 +172,7 @@ void startServer(HWND window){
         }
         auto profile=*state.profile;
         const auto runtime=state.settings.dockerEnabled&&gSandbox?gSandbox->runtimeSpec():std::string{};
-        if(runtime.empty()){profile.tools="none";profile.toolsRuntime="none";}
+        if(runtime.empty())profile.toolsRuntime.clear();
         else profile.toolsRuntime=runtime;
         if(port::isListening(state.settings.host,state.settings.port)){postOperation(window,"Configured server port is already in use.");gOperationRunning=false;return;}
         std::string error;const bool started=gLlama->start(state.settings,profile,error);
@@ -190,7 +190,7 @@ void stopServer(HWND window,bool restart){
             if(valid&&port::isListening(state.settings.host,state.settings.port)){error="Configured server port is still in use.";valid=false;}
             if(valid){
                 auto profile=*state.profile;const auto runtime=state.settings.dockerEnabled&&gSandbox?gSandbox->runtimeSpec():std::string{};
-                if(runtime.empty()){profile.tools="none";profile.toolsRuntime="none";}else profile.toolsRuntime=runtime;
+                if(runtime.empty())profile.toolsRuntime.clear();else profile.toolsRuntime=runtime;
                 const bool started=gLlama->start(state.settings,profile,error);postOperation(window,started?"llama serve restarted.":error,started);
             }else postOperation(window,error);
         }else postOperation(window,"llama serve stopped.");

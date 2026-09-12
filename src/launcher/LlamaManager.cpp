@@ -2,13 +2,24 @@
 #include "port/PortChecker.h"
 #include "process/ProcessRunner.h"
 #include "util/Text.h"
+#include <cctype>
 #include <filesystem>
+#include <string>
 
 namespace lvk::launcher {
 namespace {
 std::wstring q(const std::filesystem::path& p) { return util::quote(p.wstring()); }
 std::wstring w(const std::string& s) { return util::wide(s); }
 std::wstring arg(const std::string& s) { return util::quote(w(s)); }
+bool hasToolsRuntime(const std::string& value) {
+    std::string normalized;
+    normalized.reserve(value.size());
+    for (const unsigned char character : value) {
+        if (!std::isspace(character)) normalized.push_back(static_cast<char>(std::tolower(character)));
+    }
+    return !normalized.empty() && normalized != "none" && normalized != "disabled"
+        && normalized != "off" && normalized != "false" && normalized != "0" && normalized != "n/a";
+}
 }
 
 std::wstring LlamaManager::commandLine(const config::Settings& s, const config::Profile& p) const {
@@ -37,10 +48,10 @@ std::wstring LlamaManager::commandLine(const config::Settings& s, const config::
             + L" --spec-draft-n-max " + std::to_wstring(p.specDraftNMax);
     }
 
-    line += L" --tools " + arg(p.tools)
-        + L" --tools-runtime " + arg(p.toolsRuntime)
-        + L" --metrics"
-        + L" --host " + arg(s.host)
+    line += L" --tools " + arg(p.tools);
+    if (hasToolsRuntime(p.toolsRuntime)) line += L" --tools-runtime " + arg(p.toolsRuntime);
+    line += L" --metrics";
+    line += L" --host " + arg(s.host)
         + L" --port " + std::to_wstring(s.port);
     if (p.agentTurnLimit != 0) {
         const auto limit = p.agentTurnLimit < 0 ? std::string("\"Infinity\"") : std::to_string(p.agentTurnLimit);
