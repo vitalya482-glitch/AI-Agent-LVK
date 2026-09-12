@@ -4,6 +4,7 @@
 #include "config/Json.h"
 #include "models/ModelCatalog.h"
 #include "models/ModelDownloader.h"
+#include "metrics/LlamaMetrics.h"
 #include "launcher/LlamaManager.h"
 #include "docker/DockerManager.h"
 #include "util/Text.h"
@@ -77,7 +78,8 @@ void freshWorkspace(const fs::path& root){
     fs::create_directories(root);config::ConfigManager manager(root);std::string error;
     require(manager.load(error),error);require(manager.settings().workspace==root/L"workspace","fresh workspace is beside launcher");
     require(fs::is_directory(root/L"workspace"),"fresh workspace created");
-    config::ConfigManager reloaded(root);require(reloaded.load(error),error);require(reloaded.settings().workspace==root/L"workspace","workspace path persists");
+    manager.settings().dockerEnabled=true;manager.settings().lastModelBrowseDirectory=root/L"models";require(manager.save(error),error);
+    config::ConfigManager reloaded(root);require(reloaded.load(error),error);require(reloaded.settings().workspace==root/L"workspace","workspace path persists");require(reloaded.settings().dockerEnabled,"Docker setting persists");require(reloaded.settings().lastModelBrowseDirectory==root/L"models","model browse folder persists");
 }
 void registry(const fs::path& root){
     fs::create_directories(root);const auto path=root/L"模型 with spaces.gguf";write(path,"GGUFtest");
@@ -86,7 +88,13 @@ void registry(const fs::path& root){
     settings.profiles.front().temperature=.71;const auto id=settings.selectedProfile;
     models::registerModel(settings,models::fromExisting(path));require(settings.profiles.size()==1&&settings.profiles.front().temperature==.71&&settings.selectedProfile==id,"dedup preserves tuning");
     const auto& entry=models::catalog().front();auto qwen=models::fromCatalog(entry,root/L"Qwen model.gguf");
-    require(qwen.context==8192&&qwen.maxContext==262144&&!qwen.mtpSupported&&qwen.mtpModelPath.empty()&&qwen.agentTurnLimit==0,"catalog context capability");
+    require(qwen.context==8192&&qwen.maxContext==262144&&qwen.cpuMoe==27&&!qwen.mtpSupported&&qwen.mtpModelPath.empty()&&qwen.agentTurnLimit==0,"catalog context capability");
+    const auto& qwen27Entry=models::catalog().at(1);
+    require(qwen27Entry.filename=="Qwen_Qwen3.6-27B-Q6_K_L.gguf"&&qwen27Entry.expectedSize==24291299840ULL&&qwen27Entry.sha256=="95c61f9a30b0e0ada59169177fde2234e6bfd0e477a45cbff52097763286f9f6","Qwen3.6-27B catalog metadata");
+    auto qwen27=models::fromCatalog(qwen27Entry,root/L"Qwen3.6-27B model.gguf");
+    require(qwen27.family=="qwen35"&&qwen27.quant=="Q6_K_L"&&qwen27.context==8192&&qwen27.maxContext==262144&&qwen27.cpuMoe==0&&!qwen27.mtpSupported,"Qwen3.6-27B runtime defaults");
+    const auto knownPath=root/util::wide(qwen27Entry.filename);write(knownPath,"GGUFtest");const auto knownExisting=models::fromExisting(knownPath);
+    require(knownExisting.family=="qwen35"&&knownExisting.quant=="Q6_K_L"&&knownExisting.cpuMoe==0&&knownExisting.maxContext==262144,"known GGUF keeps catalog tuning when browsed");
     const auto offQwen=qwen;
     qwen.agentTurnLimit=20;
     models::registerModel(settings,qwen);require(settings.selectedProfile==qwen.id,"new model selection");
@@ -99,12 +107,16 @@ void registry(const fs::path& root){
     require(llama.commandLine(settings,offQwen).find(L"--ui-config")==std::wstring::npos,"Off does not override Web UI agent turns");
     require(line.find(L"--ui-config")!=std::wstring::npos&&line.find(L"agenticMaxTurns")!=std::wstring::npos,"agent turn limit uses Web UI config");
     qwen.agentTurnLimit=-1;require(llama.commandLine(settings,qwen).find(L"Infinity")!=std::wstring::npos,"Unlimited uses Web UI Infinity config");
-    require(line.find(L"--host \"127.0.0.1\"")!=std::wstring::npos&&line.find(L"--spec-type")==std::wstring::npos,"localhost / MTP disabled");
+    require(line.find(L"--host \"127.0.0.1\"")!=std::wstring::npos&&line.find(L"--metrics")!=std::wstring::npos&&line.find(L"--spec-type")==std::wstring::npos,"localhost / metrics / MTP disabled");
+    const auto parsedMetrics=metrics::parsePrometheus("# TYPE llamacpp:requests_processing gauge\nllamacpp:requests_processing 1\nllamacpp:predicted_tokens_seconds 14.7\nllamacpp:tokens_predicted_total 100\n");
+    require(parsedMetrics&&parsedMetrics->requestsProcessing==1&&parsedMetrics->predictedTokensPerSecond&&*parsedMetrics->predictedTokensPerSecond==14.7,"llama metrics parser");
     qwen.mtpSupported=true;qwen.specType="draft-mtp";require(llama.commandLine(settings,qwen).find(L"--spec-type")==std::wstring::npos,"MTP missing draft stays disabled");
     settings.llamaCommand="C:\\llama runtime\\llama-server.exe";require(llama.commandLine(settings,qwen).starts_with(L"-m "),"direct llama-server omits serve subcommand");
     const auto quoted=util::quote(L"G:\\目录 space\\");argv=CommandLineToArgvW((L"exe "+quoted).c_str(),&argc);require(argc==2&&std::wstring(argv[1])==L"G:\\目录 space\\","Windows trailing slash quote");LocalFree(argv);
     settings.profiles.clear();settings.selectedProfile.clear();require(fs::exists(path),"remove registration leaves file");
     bool rejected=false;try{models::fromExisting(root/L"not.gguf.part");}catch(...){rejected=true;}require(rejected,"part cannot be added");
+    const auto folder=root/L"folder-scan";fs::create_directories(folder/L"nested");write(folder/L"beta.gguf","GGUFtest");write(folder/L"alpha.gguf","GGUFtest");write(folder/L"ignore.gguf.part","GGUFtest");write(folder/L"nested"/L"hidden.gguf","GGUFtest");
+    const auto discovered=models::discoverInFolder(folder);require(discovered.size()==2&&discovered.front().name=="alpha"&&discovered.back().name=="beta","folder scan finds direct GGUF files only");
     docker::DockerManager docker("ai-cpp-sandbox");const auto args=util::utf8(docker.sandboxArguments(root));
     require(args.find("-v ")!=std::string::npos&&args.find(":/workspace")!=std::string::npos,"workspace bind mount");
     require(args.find("-w /workspace")!=std::string::npos&&args.find("--read-only")!=std::string::npos,"workspace workdir and read-only root");

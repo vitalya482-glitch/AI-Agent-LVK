@@ -18,12 +18,14 @@ add_executable(AI-Agent-LVK WIN32
     src/docker/DockerManager.cpp
     src/launcher/LlamaManager.cpp
     src/memory/MemoryMonitor.cpp
+    src/metrics/LlamaMetrics.cpp
     src/process/ProcessManager.cpp
     src/process/ProcessRunner.cpp
     src/process/BackgroundWorker.cpp
     src/log/LogManager.cpp
     src/port/PortChecker.cpp
     src/ui/ModelSettingsWindow.cpp
+    src/ui/DockerSettingsWindow.cpp
     src/ui/FilePicker.cpp
     src/ui/DownloadWindow.cpp
     src/models/ModelCatalog.cpp
@@ -67,7 +69,7 @@ if(LVK_BUILD_TESTS)
         tests/ModelTests.cpp src/config/ConfigManager.cpp src/models/ModelCatalog.cpp
         src/models/ModelDownloader.cpp src/launcher/LlamaManager.cpp
         src/process/ProcessManager.cpp src/process/ProcessRunner.cpp src/log/LogManager.cpp
-        src/docker/DockerManager.cpp)
+        src/docker/DockerManager.cpp src/metrics/LlamaMetrics.cpp)
     target_include_directories(lvk-model-tests PRIVATE src)
     target_compile_features(lvk-model-tests PRIVATE cxx_std_20)
     target_compile_definitions(lvk-model-tests PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)

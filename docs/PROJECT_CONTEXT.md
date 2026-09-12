@@ -8,7 +8,7 @@ AI-Agent-LVK is a native Win32 launcher and manager for `llama.cpp`, Docker, and
 
 ## Runtime flow
 
-The GUI loads `config.json`, checks `llama`, Docker CLI/Engine, the configured Docker image, the selected model, workspace, and localhost port. Docker and the sandbox image are prerequisites for llama.cpp tools, but they do not block the native `llama serve` model startup. `Start Docker` launches Docker Desktop hidden and waits for Engine readiness; `Start AI` may request Docker startup in the background and continues with the model server. `LlamaManager` builds a profile-based `llama serve` command and `ProcessManager` launches it directly with `CreateProcessW`, hidden window, and redirected output. `PortChecker` verifies readiness. The GUI can stop/restart that exact process, show logs, open the Web UI, rebuild the sandbox, open configured folders, and edit model tuning through a native Model Settings page.
+The GUI loads `config.json` and checks llama, the selected model, workspace, and localhost port for the main launcher view. Docker CLI/Engine/image checks live on the separate Docker Settings page. Docker is optional: Start AI launches the native `llama serve` model independently, while a connected Docker sandbox is used only when `docker_enabled` is true. `LlamaManager` builds a profile-based `llama serve` command and `ProcessManager` launches it directly with `CreateProcessW`, hidden window, and redirected output. `PortChecker` verifies readiness. The GUI can stop/restart that exact process, show logs, open the Web UI, and edit model tuning through native settings pages.
 
 The default endpoint is `127.0.0.1:8080`. On first run the workspace is beside
 the launcher at `<launcher-directory>\workspace` when writable, otherwise
@@ -19,9 +19,10 @@ access.
 
 ## Portable Docker workspace
 
-`ConfigManager` persists the host directory as `workspace_path` (and accepts the
-old `workspace` key during migration). **Change Workspace** updates it and
-**Open Workspace** opens the same directory used by Start AI. Before launch,
+`ConfigManager` persists the host directory as `workspace_path` and Docker's
+optional state as `docker_enabled` (and accepts the old `workspace` key during
+migration). **Docker Settings → Change Workspace** updates it and
+**Open Workspace** opens the same directory used by the sandbox. Before connecting,
 `DockerManager` creates a launcher-owned container with the effective shape:
 
 ```text
@@ -85,7 +86,7 @@ Migration preserves ALL existing context values, including 8192 and 16384. The p
 
 Future launcher tuning work should continue exposing model/runtime parameters through profiles rather than hardcoding them. Parameters discussed during model tuning should be documented with a short explanation of what they control and should remain independently configurable per model profile.
 
-The Win32 GUI includes a background memory monitor. It uses `GlobalMemoryStatusEx` for system RAM, `GetProcessMemoryInfo` for the launcher-owned llama process, and optional dynamically loaded NVML for GPU memory. Missing NVML is reported as unavailable without an external helper process.
+The Win32 GUI includes a background memory and generation-speed monitor. It uses `GlobalMemoryStatusEx` for system RAM, `GetProcessMemoryInfo` for the launcher-owned llama process, and optional dynamically loaded NVML for GPU memory. The same worker polls llama.cpp's short-timeout `/metrics` endpoint, using `requests_processing`, `predicted_tokens_seconds`, and the generation-token counter to display decode speed or `idle`/`n/a`; no metrics I/O runs on the GUI thread. Missing NVML is reported as unavailable without an external helper process.
 
 ## Updater
 
@@ -97,9 +98,9 @@ Do not restore the old console core, embedded llama.cpp submodule build, custom 
 
 ## Model catalog, registration and download
 
-`src/models/ModelCatalog.*` is separate from installed-model storage and the main window. Its first entry is Qwen3.6-35B-A3B Q4_K_M from ggml-org on Hugging Face: 20,419,565,568 bytes with verified SHA-256. Recommended launcher context is 8192 and the current profile permits discrete values through the documented 262144-token model context window; MTP is false. CPU MoE 27 is only an editable initial value, not a performance guarantee. Unknown manually added GGUFs also start conservatively; existing model settings are never reset.
+`src/models/ModelCatalog.*` is separate from installed-model storage and the main window. The catalog includes Qwen3.6-35B-A3B Q4_K_M from ggml-org on Hugging Face (20,419,565,568 bytes) and Qwen3.6-27B Q6_K_L from bartowski (24,291,299,840 bytes), both with verified SHA-256. Both profiles start at context 8192 and permit discrete values through the documented 262144-token model context window. The 35B-A3B profile starts with CPU MoE 27; the dense 27B profile starts with CPU MoE 0. MTP remains false until a separate compatible draft file is explicitly configured. Unknown manually added GGUFs also start conservatively; existing model settings are never reset.
 
-Add Existing uses a modern IFileOpenDialog GGUF picker and worker validation, with filename-derived display names and no data copying. Download Model uses a modeless Win32 DownloadWindow and folder picker (IFileDialog / FOS_PICKFOLDERS). A visible path and explicit Download are required every time. Missing entries stay registered with [Missing]; Locate changes only the path, Remove from List changes only registration, and Open Model Folder uses the selected entry. Changing selection while running requires Restart to apply it.
+Add Existing uses a modern IFileOpenDialog GGUF picker and worker validation, with filename-derived display names and no data copying. The main-window **Browse...** button selects a folder and asynchronously registers every direct regular `.gguf` file; it never scans subfolders, copies files, or overwrites existing per-model settings. The selected folder persists as `last_model_browse_directory`. Download Model uses a modeless Win32 DownloadWindow and folder picker (IFileDialog / FOS_PICKFOLDERS). A visible path and explicit Download are required every time. Missing entries stay registered with [Missing]; Locate changes only the path, Remove from List changes only registration, and Open Model Folder uses the selected entry. Changing selection while running requires Restart to apply it.
 
 ModelDownloader is an independently testable worker-only service. Preflight checks directory, write access, disk reserve, final-file conflicts and partial-file conflicts. Use Existing verifies the full file; Re-download preserves the old final until successful commit. Partial Resume is not yet implemented, but policy is separate from transport for later Range support. Restart of a partial requires explicit consent.
 

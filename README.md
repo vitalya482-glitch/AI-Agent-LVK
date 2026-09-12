@@ -8,7 +8,7 @@ The launcher is a single native Win32 executable. It checks dependencies, starts
 
 - Windows 11 x64
 - `llama` from llama.cpp, either on `PATH` or as an absolute path
-- Docker Desktop is needed for llama.cpp tools sandboxing; **Start AI** can launch the model while Docker is still starting, and **Start Docker** can start/wait for Docker Engine explicitly
+- Docker Desktop is optional. **Start AI** launches llama.cpp independently; Docker sandbox controls are grouped under **Docker Settings** and are used only when the sandbox is enabled and connected.
 - A GGUF model
 - NVIDIA GPU/CUDA is recommended for the current Qwen3-Coder profile, but the launcher itself does not require CUDA
 
@@ -39,15 +39,20 @@ The test executable is not included in release packaging.
 ## Models and configuration
 
 The toolbar's ComboBox lists **registered installed models**, not the download catalog.
+Use **Browse...** immediately to its right to select a folder: the launcher scans
+that folder (not subfolders) on a worker and adds every regular `.gguf` file to
+the list without copying or changing the model files.
 **Add Existing Model** uses the Windows GGUF file picker, validates an existing regular
 file on a worker, and registers its absolute Unicode path without copying it.
 **Download Model** opens a separate, modeless Win32 window: select a catalog entry,
 choose an existing folder with **Browse...**, and explicitly press **Download**.
 The last chosen download folder is displayed as a suggestion, never used silently.
 
-The built-in catalog is in `src/models/ModelCatalog.cpp`. Its first entry is
+The built-in catalog is in `src/models/ModelCatalog.cpp`. It includes
 [Qwen3.6-35B-A3B Q4_K_M](https://huggingface.co/ggml-org/Qwen3.6-35B-A3B-GGUF/blob/main/Qwen3.6-35B-A3B-Q4_K_M.gguf),
-20,419,565,568 bytes. The HTTPS resolve URL and SHA-256 are pinned in the entry.
+20,419,565,568 bytes, and
+[Qwen3.6-27B Q6_K_L](https://huggingface.co/bartowski/Qwen_Qwen3.6-27B-GGUF/blob/main/Qwen_Qwen3.6-27B-Q6_K_L.gguf),
+24,291,299,840 bytes. Their HTTPS resolve URLs and SHA-256 values are pinned in the entries.
 Adding another model requires a catalog entry, not changes to the main window.
 Catalog files are data-only: downloaded files are never executed.
 
@@ -57,14 +62,16 @@ Catalog files are data-only: downloaded files are never executed.
   `family`, `quant`, and all per-model tuning;
 - `active_model_id`: the current ComboBox selection;
 - `last_model_download_directory`: convenience value shown before Download;
+- `last_model_browse_directory`: most recently scanned model folder;
 - existing launcher settings (`llama_command`, `server_host`, `server_port`,
-  `workspace_path`, `docker_image`, `auto_start_server`). The old `workspace`
+  `workspace_path`, `docker_image`, `docker_enabled`, `auto_start_server`). The old `workspace`
   key is still accepted during migration.
 
 The first-run workspace is `<launcher-directory>\workspace` when that directory
 is writable; protected installations fall back to `%LOCALAPPDATA%\AI-Agent-LVK\workspace`.
-An existing configured workspace is preserved. **Change Workspace** selects and
-persists another directory, and **Open Workspace** opens the persisted directory.
+An existing configured workspace is preserved. **Docker Settings → Change Workspace**
+selects and persists another directory, and **Docker Settings → Open Workspace**
+opens the persisted directory.
 
 Legacy `profiles` / `selected_profile` and single `model_path` configs migrate
 automatically. The active Qwen3-Coder and all stored tuning are preserved, including
@@ -152,7 +159,7 @@ When enabled explicitly, the command includes `--model-draft <path>`,
 For a user-selected example folder, the Qwen3.6 command is:
 
 ```text
-llama serve -m "G:\AI\models\Qwen3.6-35B-A3B\Qwen3.6-35B-A3B-Q4_K_M.gguf" -c 8192 -np 1 -ngl 999 -ncmoe 27 --temp 0.300000 --top-k 20 --top-p 0.950000 --presence-penalty 0.000000 --repeat-penalty 1.000000 --frequency-penalty 0.000000 --batch-size 512 --ubatch-size 253 -ctk "q8_0" -ctv "q8_0" --flash-attn "on" --tools "all" --tools-runtime "docker:ai-cpp-sandbox" --host "127.0.0.1" --port 8080
+llama serve -m "G:\AI\models\Qwen3.6-35B-A3B\Qwen3.6-35B-A3B-Q4_K_M.gguf" -c 8192 -np 1 -ngl 999 -ncmoe 27 --temp 0.300000 --top-k 20 --top-p 0.950000 --presence-penalty 0.000000 --repeat-penalty 1.000000 --frequency-penalty 0.000000 --batch-size 512 --ubatch-size 253 -ctk "q8_0" -ctv "q8_0" --flash-attn "on" --tools "all" --tools-runtime "docker:ai-cpp-sandbox" --metrics --host "127.0.0.1" --port 8080
 ```
 
 The path above is an example, not an installation default. A configured
@@ -161,6 +168,7 @@ The path above is an example, not an installation default. A configured
 ## Memory monitor
 
 The GUI shows system RAM/VRAM and the RAM/VRAM reported for the launcher-owned `llama serve` process. NVIDIA VRAM is read through the optional driver-provided NVML library; if NVML is unavailable, the launcher reports it as unavailable instead of starting a helper process.
+The same background update displays `Speed: N.N tok/s` while llama.cpp is actively generating, using its `/metrics` endpoint and generation-token counters; it displays `idle` when no request is processing and `n/a` while the endpoint is unavailable. The metrics request uses a short timeout and never runs on the GUI thread.
 
 ## Docker sandbox
 
@@ -189,8 +197,8 @@ GUI stacks, Docker socket access, and privileged mode are not added.
 1. Start `AI-Agent-LVK.exe`.
 2. Select a profile.
 3. Optionally open **Model Settings** and tune the selected profile.
-4. Press **Start Docker** if Docker Desktop is not running, then use **Rebuild Sandbox** if the `ai-cpp-sandbox` image is missing.
-5. Press **Start AI**. The launcher prepares the owned sandbox with the same persisted workspace before starting llama.cpp.
+4. Open **Docker Settings**, enable Docker when tools are needed, then use **Connect / Start Docker**. Use **Rebuild Sandbox** if the `ai-cpp-sandbox` image is missing.
+5. Press **Start AI**. With Docker disabled or not connected, the model starts without Docker tools; with a connected sandbox, llama.cpp uses that owned sandbox.
 6. Press **Open Web UI** to open `http://127.0.0.1:8080`.
 7. Use **Stop** or **Restart** to control only the process launched by this window.
 

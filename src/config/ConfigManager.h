@@ -36,10 +36,12 @@ struct Settings {
     unsigned short port = 8080;
     std::filesystem::path workspace;
     std::string dockerImage = "ai-cpp-sandbox";
+    bool dockerEnabled = false;
     bool autoStartServer = false;
     std::string selectedProfile;
     std::vector<Profile> profiles;
     std::filesystem::path lastModelDownloadDirectory;
+    std::filesystem::path lastModelBrowseDirectory;
 };
 using InstalledModel = Profile; // Existing tuning UI operates on an installed model's profile.
 class ConfigManager {

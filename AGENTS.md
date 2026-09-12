@@ -21,9 +21,10 @@ Configuration is `config.json` beside the executable. Model profiles supply the 
 ## Process and safety rules
 
 - Prefer `CreateProcessW` directly with `CREATE_NO_WINDOW`, quoted arguments, and inherited stdout/stderr pipes.
-- Validate the llama command, Docker Engine, sandbox image, GGUF file, workspace, and port before starting.
+- Validate the llama command, GGUF file, workspace, and port before starting. Validate Docker Engine and the sandbox image only when Docker is enabled and the user is connecting the sandbox.
 - Server readiness is based on the configured localhost port, not merely process existence.
 - Keep log work off the GUI thread and cap or rotate logs if they grow materially.
+- Docker is configured separately from model launch. Start AI must not start Docker or create a sandbox; Docker Settings owns enable/connect/rebuild/disconnect/workspace actions.
 - Writes and process execution must stay within the explicit user configuration.
 
 ## Build and release
@@ -34,3 +35,9 @@ cmake --build build --config Release
 ```
 
 The only product executable is `AI-Agent-LVK.exe`. Preserve `app.update.json`, `LVKUpdater.exe` compatibility, the updater close bridge, and the release workflow's package/manifest behavior.
+
+## Release handoff requirements
+
+- When a release task is completed and the build/tests pass, publish the release to GitHub using the repository's existing release workflow and include the verified release artifact.
+- Before handing off a local release, clean the local release directory and leave only the working, extracted release files required to run the application. Do not leave ZIP/RAR/7z archives in that directory; the archive may be kept separately only when required by the GitHub release workflow.
+- Never report a GitHub release as published until the tag/release and its artifact upload have completed successfully. Never report the local release as clean until the extracted files have been checked.

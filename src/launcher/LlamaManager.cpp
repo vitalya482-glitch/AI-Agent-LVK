@@ -39,6 +39,7 @@ std::wstring LlamaManager::commandLine(const config::Settings& s, const config::
 
     line += L" --tools " + arg(p.tools)
         + L" --tools-runtime " + arg(p.toolsRuntime)
+        + L" --metrics"
         + L" --host " + arg(s.host)
         + L" --port " + std::to_wstring(s.port);
     if (p.agentTurnLimit != 0) {

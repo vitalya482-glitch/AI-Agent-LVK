@@ -93,8 +93,10 @@ bool ConfigManager::load(std::string& error) {
         auto workspaceText=root.at("workspace_path").str(root.at("workspace").str(util::pathText(next.workspace)));
         if(workspaceText.empty())next.workspace=defaultWorkspace(path_);else next.workspace=util::wide(workspaceText);
         next.dockerImage=root.at("docker_image").str(next.dockerImage);
+        next.dockerEnabled=root.at("docker_enabled").flag(false);
         next.autoStartServer=root.at("auto_start_server").flag();
         next.lastModelDownloadDirectory=util::wide(root.at("last_model_download_directory").str());
+        next.lastModelBrowseDirectory=util::wide(root.at("last_model_browse_directory").str());
         const bool legacy=!root.has("installed_models");
         next.selectedProfile=root.at(legacy?"selected_profile":"active_model_id").str();
         const auto& models=root.at(legacy?"profiles":"installed_models");
@@ -138,8 +140,10 @@ bool ConfigManager::save(std::string& error) const {
         const auto workspace=settings_.workspace.empty()?path_.parent_path()/L"workspace":settings_.workspace;
         Json root=Json::Object{{"schema_version",2},{"llama_command",settings_.llamaCommand},{"server_host",settings_.host},
             {"server_port",static_cast<int>(settings_.port)},{"workspace_path",util::pathText(workspace)},{"docker_image",settings_.dockerImage},
+            {"docker_enabled",settings_.dockerEnabled},
             {"auto_start_server",settings_.autoStartServer},{"active_model_id",settings_.selectedProfile},
-            {"last_model_download_directory",util::pathText(settings_.lastModelDownloadDirectory)},{"installed_models",models}};
+            {"last_model_download_directory",util::pathText(settings_.lastModelDownloadDirectory)},
+            {"last_model_browse_directory",util::pathText(settings_.lastModelBrowseDirectory)},{"installed_models",models}};
         const auto data=root.dump()+"\n";
         auto temp=path_;temp+=L".tmp";
         {std::ofstream out(temp,std::ios::binary|std::ios::trunc);out<<data;out.flush();if(!out)throw std::runtime_error("Cannot write config.json temporary file.");}

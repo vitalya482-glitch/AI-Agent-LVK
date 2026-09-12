@@ -21,6 +21,7 @@ struct Snapshot {
 
     std::optional<std::uint64_t> aiRam;
     std::optional<std::uint64_t> aiVram;
+    std::string generationSpeed = "n/a";
 };
 
 Snapshot collect(HANDLE processHandle, unsigned long processId);

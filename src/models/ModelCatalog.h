@@ -9,12 +9,16 @@ struct ModelCatalogEntry {
     std::uint64_t expectedSize{};
     std::string sha256;
     int recommendedContext=8192, maxContext=8192;
+    int recommendedCpuMoe=27;
     bool mtpSupported=false;
     std::string mtpDownloadUrl;
 };
 const std::vector<ModelCatalogEntry>& catalog();
 config::InstalledModel fromCatalog(const ModelCatalogEntry&, const std::filesystem::path&);
 config::InstalledModel fromExisting(const std::filesystem::path&);
+// Discover direct .gguf files in a user-selected folder. No files are copied,
+// executed, or recursively discovered.
+std::vector<config::InstalledModel> discoverInFolder(const std::filesystem::path&);
 // Filesystem validation runs on a worker, not the message loop.
 std::filesystem::path validateGguf(const std::filesystem::path&);
 std::string newModelId();
