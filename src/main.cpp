@@ -309,7 +309,13 @@ LRESULT CALLBACK windowProc(HWND window,UINT message,WPARAM wParam,LPARAM lParam
             for(auto& model:result->discovered){
                 const auto existing=std::find_if(settings.profiles.begin(),settings.profiles.end(),[&model](const auto& profile){return _wcsicmp(profile.model.c_str(),model.model.c_str())==0;});
                 if(existing==settings.profiles.end()){settings.profiles.push_back(std::move(model));++added;}
-                else existing->missing=false;
+                else {
+                    existing->missing=false;
+                    // A legacy profile can retain an old display name after its
+                    // GGUF path was relocated. Refresh only metadata that is
+                    // derived from the file name; keep all saved model tuning.
+                    if(existing->family.empty()&&existing->quant.empty())existing->name=model.name;
+                }
             }
             const auto stillSelected=std::find_if(settings.profiles.begin(),settings.profiles.end(),[&selected](const auto& profile){return profile.id==selected;});
             if(stillSelected==settings.profiles.end()&&!firstDiscovered.empty()){
